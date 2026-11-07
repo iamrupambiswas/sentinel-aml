@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  # 1. Relational Database (System of Record)
+  mysql:
+    image: mysql:8.0
+    container_name: sentinel-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: sentinel_dev
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - sentinel-network
+
+  # 2. In-Memory Cache (Sliding Windows & Rate Limiting)
+  redis:
+    image: redis:7.0-alpine
+    container_name: sentinel-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - sentinel-network
+
+  # 3. Message Broker (Async Event Pipeline)
+  activemq:
+    image: apache/activemq-artemis:latest-alpine
+    container_name: sentinel-activemq
+    environment:
+      ARTEMIS_USER: admin
+      ARTEMIS_PASSWORD: adminpassword
+    ports:
+      - "61616:61616" # JMS Port
+      - "8161:8161"   # Web Console
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8161/console"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - sentinel-network
+
+  # 4. Identity Provider (OAuth2 / JWTs)
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.1
+    container_name: sentinel-keycloak
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    command: start-dev
+    ports:
+      - "8080:8080"
+    networks:
+      - sentinel-network
+
+  # 5. Database GUI (Optional, for easy schema inspection)
+  adminer:
+    image: adminer:latest
+    container_name: sentinel-adminer
+    ports:
+      - "8081:8080"
+    networks:
+      - sentinel-network
+
+networks:
+  sentinel-network:
+    driver: bridge
