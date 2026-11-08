@@ -11,7 +11,6 @@
     <name>Sentinel AML Parent</name>
     <description>Parent POM for Sentinel AML Microservices</description>
 
-    <!-- 1. Define Child Modules -->
     <modules>
         <module>common-lib</module>
         <module>gateway-service</module>
@@ -21,7 +20,6 @@
         <module>alert-case-service</module>
     </modules>
 
-    <!-- 2. Global Properties & Versions -->
     <properties>
         <java.version>21</java.version>
         <spring-boot.version>3.2.5</spring-boot.version>
@@ -34,7 +32,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
-    <!-- 3. Dependency Management (BOMs - strictly version control, does not import) -->
+    <!-- The Rulebook: Locks versions, but does not force download -->
     <dependencyManagement>
         <dependencies>
             <dependency>
@@ -58,25 +56,28 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+
+            <!-- Standardized 3rd Party Versions -->
+            <dependency>
+                <groupId>org.springdoc</groupId>
+                <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+                <version>2.5.0</version>
+            </dependency>
+            <dependency>
+                <groupId>net.datafaker</groupId>
+                <artifactId>datafaker</artifactId>
+                <version>2.1.0</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
-    <!-- 4. Global Dependencies (Injected into EVERY child module automatically) -->
+    <!-- The Mandatory Uniform: Forced into every child module -->
     <dependencies>
-        <!-- Boilerplate Reduction -->
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
-
-        <!-- AOP for Centralized Logging & Aspect Management -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-aop</artifactId>
-        </dependency>
-
-        <!-- Global Testing Frameworks (JUnit 5, Mockito, AssertJ) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
@@ -84,7 +85,6 @@
         </dependency>
     </dependencies>
 
-    <!-- 5. Build Plugins (Standardizing Java 21 compilation) -->
     <build>
         <plugins>
             <plugin>
