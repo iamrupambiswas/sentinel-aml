@@ -7,6 +7,7 @@ import com.sentinel.aml.ingestion_service.entity.IngestionError;
 import com.sentinel.aml.ingestion_service.entity.OutboxEvent;
 import com.sentinel.aml.ingestion_service.entity.Transaction;
 import com.sentinel.aml.ingestion_service.repository.IngestionErrorRepository;
+import com.sentinel.aml.ingestion_service.service.AccountValidationService;
 import com.sentinel.aml.ingestion_service.service.FxRateService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,9 +35,24 @@ public class TransactionItemProcessor implements ItemProcessor<TransactionCsvDto
     @Value("#{jobParameters['batchId']}")
     private String batchId;
 
+    private final AccountValidationService accountValidationService;
+
     @Override
     public ProcessedTransaction process(TransactionCsvDto item) {
         try {
+
+            // 1. Basic structural check
+            if (item.getAmount() == null || item.getAmount().trim().isEmpty()) {
+                throw new IllegalArgumentException("Amount column is missing or empty");
+            }
+
+            // 2. Redis Account Validation (Mocked)
+            if (!accountValidationService.isAccountValid(item.getSourceAccountId())) {
+                throw new IllegalArgumentException("Invalid Source Account ID: " + item.getSourceAccountId());
+            }
+            if (!accountValidationService.isAccountValid(item.getDestinationAccountId())) {
+                throw new IllegalArgumentException("Invalid Destination Account ID: " + item.getDestinationAccountId());
+            }
 
             // Inside TransactionItemProcessor.process(TransactionCsvDto item)
             if (item.getAmount() == null || item.getAmount().trim().isEmpty()) {
