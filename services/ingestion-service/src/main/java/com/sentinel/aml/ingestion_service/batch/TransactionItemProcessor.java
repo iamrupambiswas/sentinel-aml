@@ -37,6 +37,12 @@ public class TransactionItemProcessor implements ItemProcessor<TransactionCsvDto
     @Override
     public ProcessedTransaction process(TransactionCsvDto item) {
         try {
+
+            // Inside TransactionItemProcessor.process(TransactionCsvDto item)
+            if (item.getAmount() == null || item.getAmount().trim().isEmpty()) {
+                throw new IllegalArgumentException("Amount column is missing or empty");
+            }
+
             BigDecimal amount = new BigDecimal(item.getAmount());
             if (amount.compareTo(BigDecimal.ZERO) <= 0) {
                 throw new IllegalArgumentException("Amount must be positive");
