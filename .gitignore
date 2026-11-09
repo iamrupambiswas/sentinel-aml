@@ -81,3 +81,5 @@ override.tf.json
 load-tests/**/*.jtl
 load-tests/**/reports/
 load-tests/**/logs/
+
+docs/
