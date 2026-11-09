@@ -1,7 +1,7 @@
 package com.sentinel.aml.controller;
 
+import com.sentinel.aml.common.constants.ApiRoutes;
 import com.sentinel.aml.common.dto.ApiResponse;
-import com.sentinel.aml.constants.ApiRoutes;
 import com.sentinel.aml.seeder.DataSeederService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping(ApiRoutes.API_V1 + "/admin")
+@RequestMapping(ApiRoutes.ADMIN)
 @RequiredArgsConstructor
 public class AdminController {
 

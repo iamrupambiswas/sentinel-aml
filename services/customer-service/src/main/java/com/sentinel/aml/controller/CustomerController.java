@@ -1,7 +1,7 @@
 package com.sentinel.aml.controller;
 
+import com.sentinel.aml.common.constants.ApiRoutes;
 import com.sentinel.aml.common.dto.ApiResponse;
-import com.sentinel.aml.constants.ApiRoutes;
 import com.sentinel.aml.dto.CustomerRegistrationRequest;
 import com.sentinel.aml.entity.Customer;
 import com.sentinel.aml.service.CustomerProfileService;
