@@ -1,9 +1,12 @@
 package com.sentinel.aml.detection_service.service;
 
-import com.sentinel.aml.detection_service.entity.AmlRule;
-import java.util.List;
+import com.sentinel.aml.detection_service.engine.RuleConfig;
+
+import java.util.Map;
 
 public interface RuleCacheService {
     void refreshRuleCache();
-    List<AmlRule> getActiveRules();
+
+    /** Active rules keyed by rule code. Returned map is an immutable snapshot. */
+    Map<String, RuleConfig> getActiveRules();
 }

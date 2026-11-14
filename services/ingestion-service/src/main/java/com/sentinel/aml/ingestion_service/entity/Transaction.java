@@ -42,6 +42,20 @@ public class Transaction {
     @Column(nullable = false)
     private String type;
 
+    /** Stored in UTC. */
     @Column(name = "txn_timestamp", nullable = false)
     private LocalDateTime txnTimestamp;
+
+    @Column(name = "counterparty_name")
+    private String counterpartyName;
+
+    @Column(name = "counterparty_country")
+    private String counterpartyCountry;
+
+    /** Null for streaming (REST) transactions. */
+    @Column(name = "batch_id")
+    private String batchId;
+
+    @Column(name = "ingested_at")
+    private LocalDateTime ingestedAt;
 }

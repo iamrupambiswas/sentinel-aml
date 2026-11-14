@@ -1,99 +1,87 @@
 package com.sentinel.aml.ingestion_service.service.impl;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sentinel.aml.ingestion_service.dto.IngestionResult;
+import com.sentinel.aml.ingestion_service.dto.ProcessedTransaction;
 import com.sentinel.aml.ingestion_service.dto.TransactionRequest;
-import com.sentinel.aml.ingestion_service.entity.OutboxEvent;
-import com.sentinel.aml.ingestion_service.entity.Transaction;
-import com.sentinel.aml.ingestion_service.repository.OutboxEventRepository;
-import com.sentinel.aml.ingestion_service.repository.TransactionRepository;
-import com.sentinel.aml.ingestion_service.service.FxRateService;
+import com.sentinel.aml.ingestion_service.exception.RequestInProgressException;
 import com.sentinel.aml.ingestion_service.service.TransactionIngestionService;
+import com.sentinel.aml.ingestion_service.support.TransactionFactory;
+import com.sentinel.aml.ingestion_service.support.TransactionPersister;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
+import java.util.List;
 
+/**
+ * Streaming ingestion (P5) with idempotency (X1):
+ * <ol>
+ *   <li>SET idempotency:txn:{key} PROCESSING NX EX 24h - only one request per key wins.</li>
+ *   <li>Save transaction + outbox row in one DB transaction (transactional outbox).</li>
+ *   <li>After COMMIT the key's value becomes the transactionId, so a retry gets the original
+ *       response back. After ROLLBACK the key is deleted, so the client can safely retry.</li>
+ * </ol>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class TransactionIngestionServiceImpl implements TransactionIngestionService {
 
-    private final OutboxEventRepository outboxRepository;
-    private final TransactionRepository transactionRepository;
-    private final FxRateService fxRateService;
+    static final String KEY_PREFIX = "idempotency:txn:";
+    static final String IN_PROGRESS = "PROCESSING";
+    static final Duration KEY_TTL = Duration.ofHours(24);
+
+    private final TransactionFactory transactionFactory;
+    private final TransactionPersister transactionPersister;
     private final StringRedisTemplate redisTemplate;
-    private final ObjectMapper objectMapper;
 
     @Override
     @Transactional
-    public String ingestTransaction(TransactionRequest request, String idempotencyKey) {
-        String redisKey = "idempotency:txn:" + idempotencyKey;
+    public IngestionResult ingestTransaction(TransactionRequest request, String idempotencyKey) {
+        String redisKey = KEY_PREFIX + idempotencyKey;
 
-        // 1. Check Idempotency using Redis SETNX (Set if Not Exists)
-        Boolean isNewRequest = redisTemplate.opsForValue().setIfAbsent(redisKey, "PROCESSING", Duration.ofHours(24));
-
+        Boolean isNewRequest = redisTemplate.opsForValue().setIfAbsent(redisKey, IN_PROGRESS, KEY_TTL);
         if (Boolean.FALSE.equals(isNewRequest)) {
-            log.warn("Duplicate request detected for Idempotency-Key: {}", idempotencyKey);
-            throw new IllegalArgumentException("Duplicate transaction request. Idempotency key already processed.");
+            String existing = redisTemplate.opsForValue().get(redisKey);
+            if (existing == null || IN_PROGRESS.equals(existing)) {
+                throw new RequestInProgressException(
+                        "A request with this Idempotency-Key is still being processed. Retry shortly.");
+            }
+            log.info("Idempotent replay for key {} -> transaction {}", idempotencyKey, existing);
+            return new IngestionResult(existing, true);
         }
 
-        String transactionId = UUID.randomUUID().toString();
-        LocalDateTime now = LocalDateTime.now();
-
-        // 2. Calculate Normalized INR Amount
-        BigDecimal amountInr = fxRateService.normalizeToInr(request.amount(), request.currency());
-
-        // 3. Save exactly as required by the Blueprint DB Schema
-        Transaction txn = Transaction.builder()
-                .id(transactionId)
-                .externalRef(idempotencyKey)
-                .sourceAccountId(request.sourceAccountId())
-                .destinationAccountId(request.destinationAccountId())
-                .amount(request.amount())
-                .currency(request.currency())
-                .amountInr(amountInr)
-                .type(request.type())
-                .txnTimestamp(now)
-                .build();
-
-        transactionRepository.save(txn);
-        log.info("Saved transaction {} to database.", transactionId);
-
-        // 4. Prepare the event payload for the Detection Service
-        Map<String, Object> enrichedEvent = new HashMap<>();
-        enrichedEvent.put("transactionId", transactionId);
-        enrichedEvent.put("timestamp", now.toString());
-        enrichedEvent.put("amountInr", amountInr);
-        enrichedEvent.put("payload", request);
-
+        ProcessedTransaction processed;
         try {
-            // 5. Save to Outbox instead of direct JMS publish
-            OutboxEvent outboxEvent = OutboxEvent.builder()
-                    .id(UUID.randomUUID().toString())
-                    .aggregateType("TRANSACTION")
-                    .aggregateId(transactionId)
-                    .payload(objectMapper.writeValueAsString(enrichedEvent))
-                    .status("PENDING")
-                    .createdAt(now)
-                    .build();
-
-            outboxRepository.save(outboxEvent);
-            log.info("Transaction {} securely written to outbox table.", transactionId);
-
-        } catch (JsonProcessingException e) {
-            redisTemplate.delete(redisKey); // Release lock if parsing fails
-            throw new RuntimeException("Failed to serialize transaction payload", e);
+            processed = transactionFactory.build(new TransactionFactory.Input(
+                    idempotencyKey, null,
+                    request.sourceAccountId(), request.destinationAccountId(),
+                    request.amount(), request.currency(), request.type(),
+                    request.counterpartyName(), request.counterpartyCountry(), request.txnTimestamp()));
+        } catch (RuntimeException e) {
+            redisTemplate.delete(redisKey); // validation failed: let the client fix and retry with same key
+            throw e;
         }
 
-        return transactionId;
+        String transactionId = processed.getTransaction().getId();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == STATUS_COMMITTED) {
+                    redisTemplate.opsForValue().set(redisKey, transactionId, KEY_TTL);
+                } else {
+                    redisTemplate.delete(redisKey);
+                }
+            }
+        });
+
+        transactionPersister.persistAll(List.of(processed));
+        log.info("Transaction {} saved with outbox event {}", transactionId, processed.getOutboxEvent().getId());
+        return new IngestionResult(transactionId, false);
     }
 }

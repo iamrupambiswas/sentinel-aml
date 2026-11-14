@@ -8,5 +8,5 @@ import java.util.List;
 
 @Repository
 public interface AmlRuleRepository extends JpaRepository<AmlRule, String> {
-    List<AmlRule> findByIsActiveTrue();
+    List<AmlRule> findByActiveTrue();
 }

@@ -7,6 +7,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.ServletRequestBindingException;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.server.ResponseStatusException;
+import jakarta.validation.ConstraintViolationException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -51,6 +56,21 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
     }
 
+    // Missing/invalid headers & params (e.g. no Idempotency-Key) are client errors, not 500s
+    @ExceptionHandler({ServletRequestBindingException.class, MethodArgumentTypeMismatchException.class,
+            ConstraintViolationException.class, HandlerMethodValidationException.class})
+    public ResponseEntity<ApiResponse<Void>> handleBadRequest(Exception ex) {
+        log.warn("Bad request: {}", ex.getMessage());
+        return new ResponseEntity<>(ApiResponse.<Void>builder()
+                .success(false).message("Bad request").errors(List.of(ex.getMessage())).build(), HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ApiResponse<Void>> handleResponseStatus(ResponseStatusException ex) {
+        return ResponseEntity.status(ex.getStatusCode()).body(ApiResponse.<Void>builder()
+                .success(false).message(ex.getReason()).build());
+    }
+
     // Handles everything else (Catch-all)
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleAllOtherExceptions(Exception ex) {
@@ -59,7 +79,6 @@ public class GlobalExceptionHandler {
         ApiResponse<Void> response = ApiResponse.<Void>builder()
                 .success(false)
                 .message("An internal server error occurred")
-                .errors(List.of(ex.getMessage()))
                 .build();
 
         return new ResponseEntity<>(response, HttpStatus.INTERNAL_SERVER_ERROR);

@@ -1,6 +1,7 @@
 package com.sentinel.aml.ingestion_service.service.impl;
 
 import com.sentinel.aml.ingestion_service.entity.FxRate;
+import com.sentinel.aml.ingestion_service.exception.InvalidTransactionException;
 import com.sentinel.aml.ingestion_service.repository.FxRateRepository;
 import com.sentinel.aml.ingestion_service.service.FxRateService;
 import lombok.RequiredArgsConstructor;
@@ -21,13 +22,13 @@ public class FxRateServiceImpl implements FxRateService {
     public BigDecimal getRateToInr(String currencyCode) {
         return fxRateRepository.findById(currencyCode.toUpperCase())
                 .map(FxRate::getRateToInr)
-                .orElseThrow(() -> new IllegalArgumentException("Unsupported currency: " + currencyCode));
+                .orElseThrow(() -> new InvalidTransactionException("Unsupported currency: " + currencyCode));
     }
 
     @Override
     public BigDecimal normalizeToInr(BigDecimal amount, String currencyCode) {
         if ("INR".equalsIgnoreCase(currencyCode)) {
-            return amount;
+            return amount.setScale(4, RoundingMode.HALF_UP);
         }
         BigDecimal rate = getRateToInr(currencyCode);
         return amount.multiply(rate).setScale(4, RoundingMode.HALF_UP);
