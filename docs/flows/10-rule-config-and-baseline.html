@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rule config, watchlist & baseline · Sentinel AML flows</title>
+<link rel="stylesheet" href="assets/flows.css?v=3">
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" aria-label="Flow pages"></nav>
+<main>
+<div class="eyebrow">Detection</div>
+<h1>Rule config, watchlist & baseline</h1>
+<p class="lede">The slow-changing inputs to detection: how they are loaded, cached, refreshed and triggered manually.</p>
+<div class="chips"><span class="chip">Service <b>detection-service :8084</b></span><span class="chip">Refresh <b>5 min + on demand</b></span><span class="chip">Baseline <b>00:30 UTC</b></span></div>
+<h2>Rule configuration cache</h2><div class="diagram"><pre class="mermaid">
+flowchart LR
+    DB[("aml_rule<br/>threshold, window, weight, params JSON")] -->|findByActiveTrue| RC["RuleCacheServiceImpl.refreshRuleCache()"]
+    T1["ApplicationReadyEvent"] --> RC
+    T2["@Scheduled every 5 min"] --> RC
+    T3["POST /api/v1/detection/rules/reload"] --> RC
+    RC -->|"parse params, build Map, then rules = Map.copyOf(...)"| V["volatile Map of RuleConfig"]
+    V -->|getActiveRules| E["DetectionEngine"]
+    V -->|GET /api/v1/rules| API["DetectionAdminController"]
+</pre><div class="caption">The whole map is swapped in one write, so a consumer never sees a half-built rule set.</div></div><h2>Watchlist</h2><div class="diagram"><pre class="mermaid">
+flowchart LR
+    WDB[("watchlist_entry<br/>COUNTRY / NAME, active")] --> WS["WatchlistService.refresh()<br/>startup, every 5 min, reload endpoint"]
+    WS --> CSET["countries: Set (upper case)"]
+    WS --> NLIST["names: List (normalized)"]
+    CSET --> R4["HighRiskJurisdictionRule"]
+    NLIST -->|"bestNameMatch: max Jaro-Winkler >= 0.92"| R4
+</pre></div><h2>Nightly baseline</h2><div class="diagram"><pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant T as Scheduler 00:30 UTC / POST baseline/recompute
+    participant B as BaselineJob
+    participant W as RedisSlidingWindowStore
+    participant R as Redis
+    T->>B: runNightly() / recomputeAll()
+    B->>W: activeAccounts()
+    W->>R: SMEMBERS aml:accounts:active
+    loop each account
+        B->>W: dailyTotals(acct, today-90, today-1)
+        W->>R: pipeline HVALS aml:day:{acct}:{day} x 90
+        B->>B: average over days with activity
+        B->>W: putBaseline(acct, avg, 3 days)
+        W->>R: SET aml:baseline:{acct}
+    end
+</pre></div><h2>Components</h2><div class="table-wrap"><table><thead><tr><th>Component</th><th>Kind</th><th>Responsibility</th></tr></thead><tbody><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/service/impl/RuleCacheServiceImpl.java"><code>RuleCacheServiceImpl</code></a><span class="path">detection-service/…/service/impl/RuleCacheServiceImpl.java</span></td><td><span class="badge k-service">Service</span></td><td>Loads and swaps the active rule set</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/entity/AmlRule.java"><code>AmlRule</code></a><span class="path">detection-service/…/entity/AmlRule.java</span></td><td><span class="badge k-entity">Entity</span></td><td>Maps <code>aml_rule</code></td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/repository/AmlRuleRepository.java"><code>AmlRuleRepository</code></a><span class="path">detection-service/…/repository/AmlRuleRepository.java</span></td><td><span class="badge k-repo">Repository</span></td><td><code>findByActiveTrue()</code></td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/service/WatchlistService.java"><code>WatchlistService</code></a><span class="path">detection-service/…/service/WatchlistService.java</span></td><td><span class="badge k-service">Service</span></td><td>Country set, name list, fuzzy match</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/entity/WatchlistEntry.java"><code>WatchlistEntry</code></a><span class="path">detection-service/…/entity/WatchlistEntry.java</span></td><td><span class="badge k-entity">Entity</span></td><td>Maps <code>watchlist_entry</code></td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/job/BaselineJob.java"><code>BaselineJob</code></a><span class="path">detection-service/…/job/BaselineJob.java</span></td><td><span class="badge k-job">Job</span></td><td>90-day average per active account</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/controller/DetectionAdminController.java"><code>DetectionAdminController</code></a><span class="path">detection-service/…/controller/DetectionAdminController.java</span></td><td><span class="badge k-controller">Controller</span></td><td>Rules view, reload, baseline trigger</td></tr></tbody></table></div><h2>Endpoints</h2><div class="table-wrap"><table><thead><tr><th>Method</th><th>Path</th><th>Effect</th></tr></thead><tbody><tr><td>GET</td><td><code>/api/v1/rules</code></td><td>Active rule configs from the cache</td></tr><tr><td>POST</td><td><code>/api/v1/detection/rules/reload</code></td><td>Reload rules and watchlist now</td></tr><tr><td>POST</td><td><code>/api/v1/detection/baseline/recompute</code></td><td>Run the baseline job now; returns the number of accounts updated</td></tr></tbody></table></div><h2>Data touched</h2><div class="table-wrap"><table><thead><tr><th>Store</th><th>Object</th><th>Access</th><th>When</th></tr></thead><tbody><tr><td>MySQL sentinel_detection</td><td><code>aml_rule</code></td><td><span class="badge b-read">READ</span></td><td>Every refresh</td></tr><tr><td>MySQL sentinel_detection</td><td><code>watchlist_entry</code></td><td><span class="badge b-read">READ</span></td><td>Every refresh</td></tr><tr><td>Redis</td><td><code>aml:accounts:active</code></td><td><span class="badge b-read">READ</span></td><td>Baseline job</td></tr><tr><td>Redis</td><td><code>aml:day:{acct}:{yyyyMMdd}</code></td><td><span class="badge b-read">READ</span></td><td>Baseline job (pipelined)</td></tr><tr><td>Redis</td><td><code>aml:baseline:{acct}</code></td><td><span class="badge b-write">WRITE</span></td><td>Baseline job, TTL 3 days</td></tr></tbody></table></div><h2>Configuration properties</h2><div class="table-wrap"><table><thead><tr><th>Property</th><th>Default</th><th>Meaning</th></tr></thead><tbody><tr><td>sentinel.rules.refresh-ms</td><td>300000</td><td>Rule cache refresh</td></tr><tr><td>sentinel.watchlist.refresh-ms</td><td>300000</td><td>Watchlist refresh</td></tr><tr><td>sentinel.baseline.cron</td><td>0 30 0 * * *</td><td>Baseline schedule (UTC)</td></tr><tr><td>sentinel.detection.concurrency</td><td>4-8</td><td>JMS listener threads</td></tr><tr><td>sentinel.detection.external-account-prefixes</td><td>EXT-</td><td>Accounts not monitored</td></tr></tbody></table></div><div class="note">Planned for Phase 5: <code>PUT /api/v1/rules/{code}</code> writes a <code>rule_version</code> row and publishes to the topic <code>sentinel.rules.changed</code>, so every detection instance reloads in under 5 seconds. Planned for Phase 8: ShedLock on the baseline job.</div>
+</main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/flows.js?v=3"></script>
+</body>
+</html>

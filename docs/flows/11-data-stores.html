@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data stores reference · Sentinel AML flows</title>
+<link rel="stylesheet" href="assets/flows.css?v=3">
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" aria-label="Flow pages"></nav>
+<main>
+<div class="eyebrow">Reference</div>
+<h1>Data stores reference</h1>
+<p class="lede">Every table, Redis key and message destination, with the service that owns it and the classes that read or write it.</p>
+<div class="chips"><span class="chip">MySQL schemas <b>3 (+ case_db planned)</b></span><span class="chip">Redis prefixes <b>idempotency, fxRates, aml</b></span><span class="chip">Queues <b>2 + 1 topic</b></span></div>
+<h2>customer_db (customer-service)</h2><div class="diagram"><pre class="mermaid">
+erDiagram
+    customer ||--o{ account : owns
+    customer {
+        varchar id PK
+        varchar type
+        varchar full_name
+        varchar id_number "AES-GCM"
+        date dob
+        varchar nationality
+        varchar risk_rating
+        datetime onboarded_at
+    }
+    account {
+        varchar id PK
+        varchar customer_id FK
+        varchar type
+        varchar currency
+        varchar risk_rating
+        varchar status
+        datetime opened_at
+    }
+</pre></div><h2>ingestion_db (ingestion-service)</h2><div class="diagram"><pre class="mermaid">
+erDiagram
+    ingestion_batch ||--o{ ingestion_error : rejects
+    ingestion_batch ||--o{ transaction : loads
+    transaction ||--|| outbox_event : announces
+    transaction {
+        varchar id PK
+        varchar external_ref UK
+        varchar source_account_id
+        varchar destination_account_id
+        decimal amount
+        varchar currency
+        decimal amount_inr
+        varchar type
+        datetime txn_timestamp
+        varchar counterparty_name
+        varchar counterparty_country
+        varchar batch_id
+    }
+    outbox_event {
+        varchar id PK
+        varchar aggregate_id
+        json payload
+        varchar status
+        datetime created_at
+        datetime published_at
+    }
+    fx_rate {
+        varchar currency_code PK
+        decimal rate_to_inr
+    }
+    ingestion_batch {
+        varchar id PK
+        varchar status
+        int total_records
+        int failed_records
+    }
+    ingestion_error {
+        varchar id PK
+        varchar batch_id FK
+        int line_number
+        text error_reason
+    }
+</pre></div><h2>sentinel_detection (detection-service)</h2><div class="diagram"><pre class="mermaid">
+erDiagram
+    aml_rule ||--o{ aml_alert : triggers
+    aml_rule {
+        varchar rule_code PK
+        decimal threshold_amount
+        bigint window_minutes
+        decimal weight
+        boolean is_active
+        json params
+        int version
+    }
+    aml_alert {
+        varchar id PK
+        varchar transaction_id
+        varchar account_id
+        varchar rule_triggered FK
+        varchar rule_codes
+        decimal risk_score
+        text explanation
+        json evidence
+    }
+    processed_event {
+        varchar transaction_id PK
+        timestamp processed_at
+    }
+    watchlist_entry {
+        bigint id PK
+        varchar entry_type
+        varchar value
+        boolean active
+    }
+</pre></div><h2>Table ownership</h2><div class="table-wrap"><table><thead><tr><th>Table</th><th>Schema</th><th>Owner</th><th>Written by</th><th>Read by</th><th>Migration</th></tr></thead><tbody><tr><td>customer</td><td>customer_db</td><td>customer-service</td><td>CustomerProfileServiceImpl, DataSeederService</td><td>(GET endpoints planned)</td><td>V1</td></tr><tr><td>account</td><td>customer_db</td><td>customer-service</td><td>DataSeederService (cascade)</td><td>—</td><td>V1</td></tr><tr><td>transaction</td><td>ingestion_db</td><td>ingestion-service</td><td>TransactionPersister</td><td>—</td><td>V1, V4</td></tr><tr><td>outbox_event</td><td>ingestion_db</td><td>ingestion-service</td><td>TransactionPersister, OutboxPoller</td><td>OutboxPoller</td><td>V1, V4</td></tr><tr><td>fx_rate</td><td>ingestion_db</td><td>ingestion-service</td><td>V2 seed</td><td>FxRateServiceImpl</td><td>V2</td></tr><tr><td>ingestion_batch</td><td>ingestion_db</td><td>ingestion-service</td><td>BatchIngestionServiceImpl, BatchCompletionListener, BatchReconciliationListener</td><td>BatchIngestionServiceImpl</td><td>V3</td></tr><tr><td>ingestion_error</td><td>ingestion_db</td><td>ingestion-service</td><td>CsvSkipListener</td><td>BatchIngestionServiceImpl</td><td>V3, V4</td></tr><tr><td>BATCH_* (Spring Batch)</td><td>ingestion_db</td><td>ingestion-service</td><td>JobRepository</td><td>JobRepository</td><td>auto</td></tr><tr><td>aml_rule</td><td>sentinel_detection</td><td>detection-service</td><td>migrations V2, V4</td><td>RuleCacheServiceImpl</td><td>V2, V4</td></tr><tr><td>aml_alert</td><td>sentinel_detection</td><td>detection-service</td><td>TransactionConsumer</td><td>—</td><td>V3, V4</td></tr><tr><td>processed_event</td><td>sentinel_detection</td><td>detection-service</td><td>TransactionConsumer</td><td>TransactionConsumer</td><td>V1</td></tr><tr><td>watchlist_entry</td><td>sentinel_detection</td><td>detection-service</td><td>V5 seed</td><td>WatchlistService</td><td>V5</td></tr></tbody></table></div><h2>Redis keys</h2><div class="table-wrap"><table><thead><tr><th>Key pattern</th><th>Type</th><th>Service</th><th>Written by</th><th>TTL</th></tr></thead><tbody><tr><td>idempotency:txn:{key}</td><td>STRING</td><td>ingestion</td><td>TransactionIngestionServiceImpl</td><td>24 h</td></tr><tr><td>fxRates::{currency}</td><td>STRING (serialized)</td><td>ingestion</td><td>Spring Cache (FxRateServiceImpl)</td><td>1 h</td></tr><tr><td>aml:win:struct:{acct}</td><td>ZSET</td><td>detection</td><td>StructuringRule</td><td>window + 1 h</td></tr><tr><td>aml:win:cr:{acct}, aml:win:dr:{acct}</td><td>ZSET</td><td>detection</td><td>RapidMovementRule</td><td>window + 1 h</td></tr><tr><td>aml:win:round:{acct}</td><td>ZSET</td><td>detection</td><td>RoundAmountRule</td><td>window + 1 h</td></tr><tr><td>aml:day:{acct}:{yyyyMMdd}</td><td>HASH</td><td>detection</td><td>BehavioralDeviationRule</td><td>95 days</td></tr><tr><td>aml:baseline:{acct}</td><td>STRING</td><td>detection</td><td>BaselineJob</td><td>3 days</td></tr><tr><td>aml:accounts:active</td><td>SET</td><td>detection</td><td>DetectionEngine</td><td>none</td></tr><tr><td>aml:acct-risk:{acct}</td><td>STRING</td><td>detection (reader)</td><td>customer-service (Phase 5)</td><td>—</td></tr></tbody></table></div><h2>ActiveMQ destinations</h2><div class="table-wrap"><table><thead><tr><th>Destination</th><th>Type</th><th>Producer</th><th>Consumer</th><th>Payload (_type)</th></tr></thead><tbody><tr><td>sentinel.txn.ingested</td><td>queue</td><td>OutboxPoller</td><td>TransactionConsumer</td><td>TransactionIngested</td></tr><tr><td>sentinel.detection.hits</td><td>queue</td><td>TransactionConsumer</td><td>alert-case-service (Phase 5)</td><td>RuleHitsDetected</td></tr><tr><td>sentinel.rules.changed</td><td>topic</td><td>rule admin API (Phase 5)</td><td>every detection instance (Phase 5)</td><td>—</td></tr></tbody></table></div>
+</main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/flows.js?v=3"></script>
+</body>
+</html>

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The six AML rules · Sentinel AML flows</title>
+<link rel="stylesheet" href="assets/flows.css?v=3">
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" aria-label="Flow pages"></nav>
+<main>
+<div class="eyebrow">Detection</div>
+<h1>The six AML rules</h1>
+<p class="lede">Each typology as a decision flow, with its configuration, Redis structures and the evidence it attaches.</p>
+<div class="chips"><span class="chip">Package <b>engine.rules</b></span><span class="chip">Pattern <b>Strategy</b></span><span class="chip">Tests <b>45 unit tests</b></span></div>
+<h2>Shared mechanism: atomic sliding window</h2><div class="diagram"><pre class="mermaid">
+flowchart LR
+    RULE["Rule"] -->|"addAndGet(key, txnId|amountInr, eventTime, window)"| WS["RedisSlidingWindowStore"]
+    WS -->|"EVALSHA sliding_window.lua"| LUA["ZADD key score member<br/>ZREMRANGEBYSCORE key -inf (score-window<br/>PEXPIRE key window+1h<br/>ZRANGEBYSCORE key score-window score"]
+    LUA --> RES["entries in window"] --> RULE
+</pre><div class="caption">One round trip; Redis runs the script atomically, so concurrent consumers cannot interleave add / trim / read.</div></div><h2>Summary</h2><div class="table-wrap"><table><thead><tr><th>Rule</th><th>Class</th><th>Fires when</th><th>Default config</th><th>Weight</th><th>Redis</th></tr></thead><tbody><tr><td>CTR_THRESHOLD</td><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/engine/rules/CtrThresholdRule.java"><code>CtrThresholdRule</code></a><span class="path">detection-service/…/engine/rules/CtrThresholdRule.java</span></td><td>amount_inr &ge; threshold</td><td>&#8377;8,30,000</td><td>30</td><td>—</td></tr><tr><td>STRUCTURING</td><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/engine/rules/StructuringRule.java"><code>StructuringRule</code></a><span class="path">detection-service/…/engine/rules/StructuringRule.java</span></td><td>&ge; 3 txns in band within 24 h</td><td>&#8377;7,51,500 – &#8377;8,34,999</td><td>70</td><td><code>aml:win:struct:{acct}</code></td></tr><tr><td>RAPID_MOVEMENT</td><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/engine/rules/RapidMovementRule.java"><code>RapidMovementRule</code></a><span class="path">detection-service/…/engine/rules/RapidMovementRule.java</span></td><td>on DEBIT, debits &ge; 80 % of credits within 48 h</td><td>min credits &#8377;1,00,000</td><td>75</td><td><code>aml:win:cr:{acct}</code>, <code>aml:win:dr:{acct}</code></td></tr><tr><td>HIGH_RISK_JURISDICTION</td><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/engine/rules/HighRiskJurisdictionRule.java"><code>HighRiskJurisdictionRule</code></a><span class="path">detection-service/…/engine/rules/HighRiskJurisdictionRule.java</span></td><td>listed country, or name similarity &ge; 0.92</td><td>watchlist_entry</td><td>90</td><td>—</td></tr><tr><td>BEHAVIORAL_DEVIATION</td><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/engine/rules/BehavioralDeviationRule.java"><code>BehavioralDeviationRule</code></a><span class="path">detection-service/…/engine/rules/BehavioralDeviationRule.java</span></td><td>today &gt; 3 x 90-day average</td><td>min &#8377;50,000 / day</td><td>55</td><td><code>aml:day:{acct}:{yyyyMMdd}</code>, <code>aml:baseline:{acct}</code></td></tr><tr><td>ROUND_AMOUNT</td><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/engine/rules/RoundAmountRule.java"><code>RoundAmountRule</code></a><span class="path">detection-service/…/engine/rules/RoundAmountRule.java</span></td><td>&ge; 5 round txns within 7 days</td><td>modulo 1000, &ge; &#8377;1 L, or within 2 % below CTR</td><td>40</td><td><code>aml:win:round:{acct}</code></td></tr></tbody></table></div><h2>CTR_THRESHOLD</h2><p>Single large transaction (P6)</p><div class="diagram"><pre class="mermaid">
+flowchart LR
+    A["ctx.amountInr()"] --> B{">= threshold_amount<br/>830000"}
+    B -->|no| N["no hit"]
+    B -->|yes| H["hit: evidence = [txnId]<br/>bucket = txn date (UTC)"]
+</pre></div><div class="caption">Stateless. The comparison uses the INR amount, so USD 10,000 (&#8377;8,35,000) fires and so does &#8377;12,00,000 in cash.</div><h2>STRUCTURING</h2><p>Repeated deposits just below the reporting limit (P7)</p><div class="diagram"><pre class="mermaid">
+flowchart LR
+    A["amountInr"] --> B{"in [minAmountInr, maxAmountInr]?"}
+    B -->|no| N["no hit, window untouched"]
+    B -->|yes| W["addAndGet aml:win:struct:{acct}<br/>window 1440 min"]
+    W --> C{"count >= threshold (3)?"}
+    C -->|no| N2["no hit"]
+    C -->|yes| H["hit: evidence = all window txn ids<br/>explanation includes time span"]
+</pre></div><div class="caption">Only near-threshold amounts enter the window, so ordinary transactions never count.</div><h2>RAPID_MOVEMENT</h2><p>Money in and straight back out (P8)</p><div class="diagram"><pre class="mermaid">
+flowchart LR
+    D{"direction"} -->|CREDIT| C1["addAndGet aml:win:cr:{acct}"] --> N["no hit"]
+    D -->|DEBIT| D1["addAndGet aml:win:dr:{acct}"]
+    D1 --> RD["read aml:win:cr:{acct} in same window"]
+    RD --> M{"credits >= minCreditInr?"}
+    M -->|no| N2["no hit"]
+    M -->|yes| P{"debits x 100 >= 80 x credits?"}
+    P -->|no| N3["no hit"]
+    P -->|yes| H["hit: evidence = credit + debit ids"]
+</pre></div><div class="caption">The percentage is compared exactly; it is rounded only for display, so 79.9999 % does not fire.</div><h2>HIGH_RISK_JURISDICTION</h2><p>Listed country or sanctioned name (P9)</p><div class="diagram"><pre class="mermaid">
+flowchart LR
+    C["counterpartyCountry"] --> CS{"WatchlistService.isHighRiskCountry"}
+    N["counterpartyName"] --> NM["normalize: strip accents and punctuation, uppercase"]
+    NM --> JW{"Jaro-Winkler >= nameSimilarity 0.92"}
+    CS -->|yes| H["hit"]
+    JW -->|yes| H
+    CS -->|no| X{"both no?"}
+    JW -->|no| X
+    X --> NO["no hit"]
+</pre></div><div class="caption">Fires on any amount. Matching is in memory against the cached watchlist.</div><h2>BEHAVIORAL_DEVIATION</h2><p>Sudden jump over the account's normal (P10)</p><div class="diagram"><pre class="mermaid">
+flowchart LR
+    T["txn"] --> H1["HSET aml:day:{acct}:{yyyyMMdd} txnId amountInr<br/>TTL 95 days"]
+    H1 --> S["today = sum of the day's values"]
+    S --> B{"aml:baseline:{acct} exists?"}
+    B -->|no| N["no hit"]
+    B -->|yes| M{"today >= minDailyInr and<br/>today > 3 x baseline?"}
+    M -->|no| N2["no hit"]
+    M -->|yes| HIT["hit: evidence = the day's txn ids"]
+</pre></div><div class="caption">The day hash is keyed by transaction id, so a redelivered message overwrites its own entry instead of adding to the total.</div><h2>ROUND_AMOUNT</h2><p>Repeated round or just-below-threshold amounts (P11)</p><div class="diagram"><pre class="mermaid">
+flowchart LR
+    A["txn"] --> B{"amountInr >= minAmountInr?"}
+    B -->|no| N["no hit"]
+    B -->|yes| R{"original amount % 1000 == 0<br/>or within 2% below CTR?"}
+    R -->|no| N2["no hit"]
+    R -->|yes| W["addAndGet aml:win:round:{acct}<br/>window 10080 min"]
+    W --> C{"count >= 5?"}
+    C -->|yes| H["hit"]
+    C -->|no| N3["no hit"]
+</pre></div><div class="caption">Roundness uses the original currency: USD 6,000 is round even though its INR value is not.</div><h2>Shared types</h2><div class="table-wrap"><table><thead><tr><th>Component</th><th>Kind</th><th>Responsibility</th></tr></thead><tbody><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/engine/DetectionRule.java"><code>DetectionRule</code></a><span class="path">detection-service/…/engine/DetectionRule.java</span></td><td><span class="badge k-config">Config</span></td><td>Strategy interface: <code>getRuleCode()</code>, <code>evaluate(ctx, config)</code></td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/engine/RuleConfig.java"><code>RuleConfig</code></a><span class="path">detection-service/…/engine/RuleConfig.java</span></td><td><span class="badge k-service">DTO / Event</span></td><td>Parsed rule row; <code>decimal(name, default)</code> reads params</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/window/SlidingWindowStore.java"><code>SlidingWindowStore</code></a><span class="path">detection-service/…/window/SlidingWindowStore.java</span></td><td><span class="badge k-config">Config</span></td><td>Window / day / baseline operations</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/window/RedisSlidingWindowStore.java"><code>RedisSlidingWindowStore</code></a><span class="path">detection-service/…/window/RedisSlidingWindowStore.java</span></td><td><span class="badge k-service">Service</span></td><td>Redis + Lua implementation; pipelined day totals</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/window/WindowEntry.java"><code>WindowEntry</code></a><span class="path">detection-service/…/window/WindowEntry.java</span></td><td><span class="badge k-service">DTO / Event</span></td><td>Member encoding <code>txnId|amountInr</code></td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/engine/Inr.java"><code>Inr</code></a><span class="path">detection-service/…/engine/Inr.java</span></td><td><span class="badge k-service">Service</span></td><td>Indian digit grouping for explanations</td></tr><tr><td><code>sliding_window.lua</code><span class="path">detection-service/…/resources/scripts/sliding_window.lua</span></td><td><span class="badge k-config">Config</span></td><td>The atomic window script</td></tr></tbody></table></div>
+</main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/flows.js?v=3"></script>
+</body>
+</html>

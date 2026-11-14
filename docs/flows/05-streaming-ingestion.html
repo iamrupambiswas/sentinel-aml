@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Streaming ingestion (REST) · Sentinel AML flows</title>
+<link rel="stylesheet" href="assets/flows.css?v=3">
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" aria-label="Flow pages"></nav>
+<main>
+<div class="eyebrow">Ingestion</div>
+<h1>Streaming ingestion (REST)</h1>
+<p class="lede">One transaction at a time from the bank, accepted exactly once per Idempotency-Key and stored together with its outbox event.</p>
+<div class="chips"><span class="chip">Service <b>ingestion-service :8083</b></span><span class="chip">Endpoint <b>POST /api/v1/transactions</b></span><span class="chip">Schema <b>ingestion_db</b></span></div>
+<h2>Flow</h2><div class="diagram"><pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant TC as TransactionController
+    participant S as TransactionIngestionServiceImpl
+    participant R as Redis
+    participant F as TransactionFactory
+    participant FX as FxRateServiceImpl
+    participant P as TransactionPersister
+    participant DB as ingestion_db
+    C->>TC: POST /api/v1/transactions + Idempotency-Key
+    TC->>S: ingestTransaction(request, key)
+    S->>R: SET idempotency:txn:{key} PROCESSING NX EX 24h
+    alt key exists
+        S->>R: GET key
+        S-->>C: 200 replay (original id) or 409 in progress
+    else new key
+        S->>F: build(Input)
+        F->>FX: normalizeToInr(amount, currency)
+        FX->>R: fxRates::{currency} (cache)
+        FX->>DB: SELECT fx_rate on cache miss
+        alt business rule fails
+            S->>R: DEL key
+            S-->>C: 422 Transaction rejected
+        else valid
+            S->>P: persistAll([txn + outbox])
+            P->>DB: INSERT transaction, INSERT outbox_event
+            DB-->>S: COMMIT
+            S->>R: SET key = transactionId (afterCompletion)
+            S-->>C: 202 Accepted
+        end
+    end
+</pre></div><h2>Step by step</h2><ol class="steps"><li><code>TransactionController.ingestTransaction()</code> (mapped to <code>""</code> and <code>/ingest</code>) requires the <code>Idempotency-Key</code> header (max 128 chars) and validates <code>TransactionRequest</code>.</li><li><code>TransactionIngestionServiceImpl.ingestTransaction()</code> claims the key with <code>setIfAbsent(key, "PROCESSING", 24h)</code>.</li><li>If the key already exists: a transaction id as its value means a replay, so the service returns 200 with header <code>Idempotent-Replayed: true</code>; the value <code>PROCESSING</code> means 409.</li><li><code>TransactionFactory.build()</code> checks both accounts, source &ne; destination, amount &gt; 0, and that the timestamp is no more than 60 s in the future. It then converts to INR and builds the <code>Transaction</code> and <code>TransactionIngestedEvent</code>/<code>OutboxEvent</code>.</li><li>Any <code>InvalidTransactionException</code> deletes the key, so the client can correct the request and retry with the same key, and becomes a 422 via <code>IngestionExceptionHandler</code>.</li><li>A <code>TransactionSynchronization.afterCompletion</code> hook is registered: on COMMIT it stores the transaction id under the key; on ROLLBACK it deletes the key.</li><li><code>TransactionPersister.persistAll()</code> persists both rows; Spring commits the transaction and the client receives 202 with the transaction id.</li></ol><h2>Components</h2><div class="table-wrap"><table><thead><tr><th>Component</th><th>Kind</th><th>Responsibility</th></tr></thead><tbody><tr><td><a href="../../services/ingestion-service/src/main/java/com/sentinel/aml/ingestion_service/controller/TransactionController.java"><code>TransactionController</code></a><span class="path">ingestion-service/…/controller/TransactionController.java</span></td><td><span class="badge k-controller">Controller</span></td><td>HTTP contract, 202 vs 200 replay</td></tr><tr><td><a href="../../services/ingestion-service/src/main/java/com/sentinel/aml/ingestion_service/dto/TransactionRequest.java"><code>TransactionRequest</code></a><span class="path">ingestion-service/…/dto/TransactionRequest.java</span></td><td><span class="badge k-service">DTO / Event</span></td><td>Input record + Bean Validation</td></tr><tr><td><a href="../../services/ingestion-service/src/main/java/com/sentinel/aml/ingestion_service/service/impl/TransactionIngestionServiceImpl.java"><code>TransactionIngestionServiceImpl</code></a><span class="path">ingestion-service/…/service/impl/TransactionIngestionServiceImpl.java</span></td><td><span class="badge k-service">Service</span></td><td>Idempotency protocol and transaction boundary</td></tr><tr><td><a href="../../services/ingestion-service/src/main/java/com/sentinel/aml/ingestion_service/dto/IngestionResult.java"><code>IngestionResult</code></a><span class="path">ingestion-service/…/dto/IngestionResult.java</span></td><td><span class="badge k-service">DTO / Event</span></td><td>transactionId + replayed flag</td></tr><tr><td><a href="../../services/ingestion-service/src/main/java/com/sentinel/aml/ingestion_service/support/TransactionFactory.java"><code>TransactionFactory</code></a><span class="path">ingestion-service/…/support/TransactionFactory.java</span></td><td><span class="badge k-service">Service</span></td><td>Validates accounts, amount and timestamp; converts to INR; builds the entity and the outbox event. Shared by both paths.</td></tr><tr><td><a href="../../services/ingestion-service/src/main/java/com/sentinel/aml/ingestion_service/service/AccountValidationService.java"><code>AccountValidationService</code></a><span class="path">ingestion-service/…/service/AccountValidationService.java</span></td><td><span class="badge k-service">Service</span></td><td>Interface for the account check</td></tr><tr><td><a href="../../services/ingestion-service/src/main/java/com/sentinel/aml/ingestion_service/service/impl/MockAccountValidationServiceImpl.java"><code>MockAccountValidationServiceImpl</code></a><span class="path">ingestion-service/…/service/impl/MockAccountValidationServiceImpl.java</span></td><td><span class="badge k-service">Service</span></td><td>Accepts ids starting with ACC- or EXT- (stand-in for a Redis registry)</td></tr><tr><td><a href="../../services/ingestion-service/src/main/java/com/sentinel/aml/ingestion_service/service/impl/FxRateServiceImpl.java"><code>FxRateServiceImpl</code></a><span class="path">ingestion-service/…/service/impl/FxRateServiceImpl.java</span></td><td><span class="badge k-service">Service</span></td><td><code>@Cacheable("fxRates")</code> rate lookup; <code>normalizeToInr()</code>, scale 4, HALF_UP</td></tr><tr><td><a href="../../services/ingestion-service/src/main/java/com/sentinel/aml/ingestion_service/support/TransactionPersister.java"><code>TransactionPersister</code></a><span class="path">ingestion-service/…/support/TransactionPersister.java</span></td><td><span class="badge k-service">Service</span></td><td><code>persist()</code> transaction + outbox in the caller's transaction (<code>MANDATORY</code>)</td></tr><tr><td><a href="../../services/ingestion-service/src/main/java/com/sentinel/aml/ingestion_service/entity/Transaction.java"><code>Transaction</code></a><span class="path">ingestion-service/…/entity/Transaction.java</span></td><td><span class="badge k-entity">Entity</span></td><td>Maps <code>transaction</code></td></tr><tr><td><a href="../../services/ingestion-service/src/main/java/com/sentinel/aml/ingestion_service/entity/OutboxEvent.java"><code>OutboxEvent</code></a><span class="path">ingestion-service/…/entity/OutboxEvent.java</span></td><td><span class="badge k-entity">Entity</span></td><td>Maps <code>outbox_event</code></td></tr><tr><td><a href="../../services/ingestion-service/src/main/java/com/sentinel/aml/ingestion_service/exception/IngestionExceptionHandler.java"><code>IngestionExceptionHandler</code></a><span class="path">ingestion-service/…/exception/IngestionExceptionHandler.java</span></td><td><span class="badge k-config">Config</span></td><td>422 for InvalidTransactionException, 409 for RequestInProgressException</td></tr></tbody></table></div><h2>Data touched</h2><div class="table-wrap"><table><thead><tr><th>Store</th><th>Object</th><th>Access</th><th>When</th></tr></thead><tbody><tr><td>Redis</td><td><code>idempotency:txn:{key}</code></td><td><span class="badge b-rw">READ/WRITE</span></td><td>Claim (SET NX), replay check (GET), final value (SET), release (DEL)</td></tr><tr><td>Redis</td><td><code>fxRates::{currency}</code></td><td><span class="badge b-rw">READ/WRITE</span></td><td>Spring Cache, TTL 1 h</td></tr><tr><td>MySQL ingestion_db</td><td><code>fx_rate</code></td><td><span class="badge b-read">READ</span></td><td>Cache miss only</td></tr><tr><td>MySQL ingestion_db</td><td><code>transaction</code></td><td><span class="badge b-write">WRITE</span></td><td>One INSERT, <code>external_ref</code> = Idempotency-Key (UNIQUE)</td></tr><tr><td>MySQL ingestion_db</td><td><code>outbox_event</code></td><td><span class="badge b-write">WRITE</span></td><td>One INSERT, status PENDING, same transaction</td></tr></tbody></table></div><h2>Idempotency key lifecycle</h2><div class="diagram"><pre class="mermaid">
+stateDiagram-v2
+    [*] --> PROCESSING: SET NX succeeds
+    PROCESSING --> TRANSACTION_ID: commit
+    PROCESSING --> [*]: validation error or rollback (DEL)
+    TRANSACTION_ID --> TRANSACTION_ID: retry returns 200
+    TRANSACTION_ID --> [*]: TTL 24 h
+</pre></div><h2>Responses</h2><div class="table-wrap"><table><thead><tr><th>Situation</th><th>Status</th><th>Body</th></tr></thead><tbody><tr><td>First valid request</td><td>202</td><td>transactionId</td></tr><tr><td>Same key after commit</td><td>200</td><td>original transactionId, header Idempotent-Replayed: true</td></tr><tr><td>Same key still in flight</td><td>409</td><td>still being processed</td></tr><tr><td>Missing Idempotency-Key</td><td>400</td><td>Bad request</td></tr><tr><td>Bean Validation failure</td><td>400</td><td>field messages</td></tr><tr><td>Unknown account / currency, same accounts, future timestamp</td><td>422</td><td>Transaction rejected + reason</td></tr></tbody></table></div><h2>Request example</h2><pre class="code">POST /api/v1/transactions
+Idempotency-Key: 3f0c6c1e-2b1a-4d7e-9a77-1a2b3c4d5e6f
+Content-Type: application/json
+
+{
+  &quot;sourceAccountId&quot;: &quot;ACC-TRADE-01&quot;,
+  &quot;destinationAccountId&quot;: &quot;EXT-TEH-77&quot;,
+  &quot;amount&quot;: 2500,
+  &quot;currency&quot;: &quot;USD&quot;,
+  &quot;type&quot;: &quot;WIRE&quot;,
+  &quot;counterpartyName&quot;: &quot;Zenith Shell Holdings Ltd&quot;,
+  &quot;counterpartyCountry&quot;: &quot;AE&quot;,
+  &quot;txnTimestamp&quot;: &quot;2026-11-14T10:15:30Z&quot;
+}</pre><div class="note">Open gap: a retry with the same key but a different body returns the original response. Storing a hash of the body with the key and rejecting mismatches is listed in ADR-003.</div>
+</main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/flows.js?v=3"></script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Synthetic data seeding · Sentinel AML flows</title>
+<link rel="stylesheet" href="assets/flows.css?v=3">
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" aria-label="Flow pages"></nav>
+<main>
+<div class="eyebrow">Customer</div>
+<h1>Synthetic data seeding</h1>
+<p class="lede">Generates a realistic customer base with no real PII, for development and demos.</p>
+<div class="chips"><span class="chip">Service <b>customer-service :8082</b></span><span class="chip">Endpoint <b>POST /api/v1/admin/seed-data</b></span><span class="chip">Volume <b>5,000 customers / ~8,000 accounts</b></span></div>
+<h2>Flow</h2><div class="diagram"><pre class="mermaid">
+flowchart TD
+    A["POST /api/v1/admin/seed-data<br/>AdminController.seedDatabase()"] --> B["DataSeederService.seedDatabase()<br/>@Transactional"]
+    B --> C{"customerRepository.count() > 0?"}
+    C -->|yes| X["return: already seeded"]
+    C -->|no| L["for i in 1..5000"]
+    L --> G["generateFakeCustomer()<br/>Datafaker name, id, dob, nationality, risk"]
+    G --> AC["generateFakeAccount() x 1-3<br/>type, currency, status, risk"]
+    AC --> CH{"i % 1000 == 0?"}
+    CH -->|yes| SV["customerRepository.saveAll(batch)<br/>cascade ALL inserts accounts"]
+    CH -->|no| L
+    SV --> L
+    L -->|done| R["return counts"]
+</pre></div><h2>Step by step</h2><ol class="steps"><li><code>AdminController.seedDatabase()</code> delegates to the seeder and wraps the result in an <code>ApiResponse</code>.</li><li><code>DataSeederService.seedDatabase()</code> returns early when customers already exist, so the endpoint is safe to call twice.</li><li>Each customer gets 1–3 accounts (about 8,000 in total), linked through <code>Customer.accounts</code> with <code>CascadeType.ALL</code>.</li><li>Every 1,000 customers, <code>saveAll()</code> writes the chunk; the converter encrypts every generated ID number.</li></ol><h2>Components</h2><div class="table-wrap"><table><thead><tr><th>Component</th><th>Kind</th><th>Responsibility</th></tr></thead><tbody><tr><td><a href="../../services/customer-service/src/main/java/com/sentinel/aml/controller/AdminController.java"><code>AdminController</code></a><span class="path">customer-service/…/controller/AdminController.java</span></td><td><span class="badge k-controller">Controller</span></td><td>POST /api/v1/admin/seed-data</td></tr><tr><td><a href="../../services/customer-service/src/main/java/com/sentinel/aml/seeder/DataSeederService.java"><code>DataSeederService</code></a><span class="path">customer-service/…/seeder/DataSeederService.java</span></td><td><span class="badge k-service">Service</span></td><td>Generates and saves synthetic data</td></tr><tr><td><a href="../../services/customer-service/src/main/java/com/sentinel/aml/entity/Customer.java"><code>Customer</code></a><span class="path">customer-service/…/entity/Customer.java</span></td><td><span class="badge k-entity">Entity</span></td><td>Parent of accounts (cascade ALL)</td></tr><tr><td><a href="../../services/customer-service/src/main/java/com/sentinel/aml/entity/Account.java"><code>Account</code></a><span class="path">customer-service/…/entity/Account.java</span></td><td><span class="badge k-entity">Entity</span></td><td><code>@ManyToOne(fetch = LAZY)</code> to customer</td></tr><tr><td><a href="../../services/customer-service/src/main/java/com/sentinel/aml/repository/CustomerRepository.java"><code>CustomerRepository</code></a><span class="path">customer-service/…/repository/CustomerRepository.java</span></td><td><span class="badge k-repo">Repository</span></td><td>count(), saveAll()</td></tr></tbody></table></div><h2>Data touched</h2><div class="table-wrap"><table><thead><tr><th>Store</th><th>Object</th><th>Access</th><th>When</th></tr></thead><tbody><tr><td>MySQL customer_db</td><td><code>customer</code></td><td><span class="badge b-rw">READ/WRITE</span></td><td>count() check, then 5,000 INSERTs</td></tr><tr><td>MySQL customer_db</td><td><code>account</code></td><td><span class="badge b-write">WRITE</span></td><td>~8,000 INSERTs through cascade</td></tr></tbody></table></div><div class="note">The list is cleared per chunk, but Hibernate's persistence context is not, so all entities stay in memory until the single transaction commits. Adding <code>entityManager.flush(); entityManager.clear();</code> per chunk would bound memory.</div>
+</main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/flows.js?v=3"></script>
+</body>
+</html>
