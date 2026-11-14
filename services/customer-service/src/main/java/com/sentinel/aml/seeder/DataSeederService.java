@@ -23,13 +23,19 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class DataSeederService {
 
+    /** How many synthetic customers the demo dataset should contain. */
+    static final int TARGET_CUSTOMERS = 5000;
+
     private final CustomerRepository customerRepository;
     private final Faker faker = new Faker();
 
     @Transactional
     public String seedDatabase() {
-        if (customerRepository.count() > 0) {
-            return "Database is already seeded. Skipping generation to prevent duplicates.";
+        // Skip only when the dataset is already there. The old check (count() > 0) treated a
+        // single manually onboarded customer as "already seeded" and silently generated nothing.
+        long existing = customerRepository.count();
+        if (existing >= TARGET_CUSTOMERS) {
+            return "Database is already seeded (" + existing + " customers). Skipping generation to prevent duplicates.";
         }
 
         log.info("Starting synthetic data generation for 5000 Customers and ~8000 Accounts...");
