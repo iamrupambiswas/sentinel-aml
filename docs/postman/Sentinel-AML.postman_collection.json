@@ -1,0 +1,2652 @@
+{
+  "info": {
+    "_postman_id": "ef6642c6-b769-433c-8296-aa4822d4d3cd",
+    "name": "Sentinel AML - Phases 1-4",
+    "description": "Manual test collection for Sentinel AML. Import, select the 'Sentinel AML - Local' environment (or use the collection variables), and run folders 00 -> 04 in order. See docs/manual-testing-guide.md.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// One random suffix per run so detection scenarios always start with empty windows",
+          "if (!pm.collectionVariables.get(\"run\")) { pm.collectionVariables.set(\"run\", Math.random().toString(36).slice(2, 8).toUpperCase()); }"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "run",
+      "value": ""
+    },
+    {
+      "key": "txnId",
+      "value": ""
+    },
+    {
+      "key": "replayKey",
+      "value": ""
+    },
+    {
+      "key": "fixKey",
+      "value": ""
+    },
+    {
+      "key": "customerId",
+      "value": ""
+    },
+    {
+      "key": "batchId",
+      "value": ""
+    },
+    {
+      "key": "batchErrId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "00 Health checks",
+      "description": "Run these first. Every service must answer `{\"status\":\"UP\"}`.",
+      "item": [
+        {
+          "name": "Gateway health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8080/actuator/health",
+              "host": [
+                "http://localhost:8080"
+              ],
+              "path": [
+                "actuator",
+                "health"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"run\", Math.random().toString(36).slice(2, 8).toUpperCase());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"UP\", () => pm.expect(pm.response.json().status).to.eql(\"UP\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Customer health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8082/actuator/health",
+              "host": [
+                "http://localhost:8082"
+              ],
+              "path": [
+                "actuator",
+                "health"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ingestion health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8083/actuator/health",
+              "host": [
+                "http://localhost:8083"
+              ],
+              "path": [
+                "actuator",
+                "health"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detection health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8084/actuator/health",
+              "host": [
+                "http://localhost:8084"
+              ],
+              "path": [
+                "actuator",
+                "health"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Active rules (via gateway)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/rules",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rules"
+              ]
+            },
+            "description": "Proves the gateway route `/api/v1/rules/** -> detection-service`. Also look for `Loaded 6 active AML rules` in the detection log."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"6 active rules\", () => pm.expect(Object.keys(pm.response.json().data)).to.have.lengthOf(6));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 Phase 2 - Customer service",
+      "description": "Onboarding, validation, PII encryption, seeding.",
+      "item": [
+        {
+          "name": "Create customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers"
+              ]
+            },
+            "description": "**Expected:** 201 with `idNumberMasked` like `*********{last4}` and `riskRating: MEDIUM`.\n\n**Verify encryption in MySQL** (the plaintext must NOT appear):\n```sql\nSELECT id, full_name, id_number FROM customer_db.customer ORDER BY created_at DESC LIMIT 3;\n```\n`id_number` is Base64 ciphertext (IV + data + GCM tag). Create the same customer twice and you get two different ciphertexts: that is the random IV.\n\n**Log (customer-service):** `▶ [REQ] [traceId] POST /api/v1/customers` and `◀ [RES] ... 201 CREATED | Time: ..ms`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"RETAIL\",\n  \"fullName\": \"Postman Test {{run}}\",\n  \"idNumber\": \"PAN-PM{{run}}9Z\",\n  \"dob\": \"1995-06-15\",\n  \"nationality\": \"IND\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set(\"customerId\", d.id);",
+                  "pm.test(\"national ID is masked\", () => pm.expect(d.idNumberMasked).to.match(/^\\*+/));",
+                  "pm.test(\"default risk MEDIUM\", () => pm.expect(d.riskRating).to.eql(\"MEDIUM\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create customer - invalid (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers"
+              ]
+            },
+            "description": "Blank name, future DOB and lowercase nationality: Bean Validation returns 400 with one message per field (GlobalExceptionHandler).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"RETAIL\",\n  \"fullName\": \"\",\n  \"idNumber\": \"X\",\n  \"dob\": \"2999-01-01\",\n  \"nationality\": \"india\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"field errors listed\", () => pm.expect(pm.response.json().errors.length).to.be.at.least(3));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create customer - unknown enum (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers"
+              ]
+            },
+            "description": "`type` must be RETAIL / CORPORATE / INSTITUTIONAL. Jackson fails to parse the enum -> 400.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"ALIEN\",\n  \"fullName\": \"A\",\n  \"idNumber\": \"X\",\n  \"dob\": \"1990-01-01\",\n  \"nationality\": \"IND\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Seed 5,000 customers",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/seed-data",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "seed-data"
+              ]
+            },
+            "description": "Generates 5,000 customers and ~8,000-10,000 accounts (about 4 s). Calling it again returns \"already seeded\".\n\n```sql\nSELECT (SELECT COUNT(*) FROM customer_db.customer) customers, (SELECT COUNT(*) FROM customer_db.account) accounts;\n```"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 Phase 3 - Streaming ingestion",
+      "description": "Run in order: request 2 reuses the key from request 1.",
+      "item": [
+        {
+          "name": "1. Post transaction (USD -> INR)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "**Expected:** 202 + transactionId (saved to the `txnId` collection variable).\n\n**MySQL** - one transaction row, amount normalized at 83.50:\n```sql\nSELECT id, external_ref, amount, currency, amount_inr FROM ingestion_db.transaction WHERE id = '<txnId>';\nSELECT status, published_at FROM ingestion_db.outbox_event WHERE aggregate_id = '<txnId>';   -- PUBLISHED within ~200 ms\nSELECT * FROM sentinel_detection.processed_event WHERE transaction_id = '<txnId>';         -- detection consumed it\n```\n**Redis:** `docker exec -it sentinel-redis redis-cli GET idempotency:txn:<Idempotency-Key>` -> the transactionId.\n`GET \"fxRates::USD\"` shows the cached rate.\n\n**Logs:** ingestion `Transaction <id> saved with outbox event <id>`; Artemis console http://localhost:8161 -> Queues -> `sentinel.txn.ingested` shows Messages Acknowledged increasing.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"ACC-PM-{{run}}\",\n  \"destinationAccountId\": \"EXT-PM-1\",\n  \"amount\": 100,\n  \"currency\": \"USD\",\n  \"type\": \"WIRE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"replayKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"idemKey\", pm.collectionVariables.get(\"replayKey\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));",
+                  "pm.collectionVariables.set(\"txnId\", pm.response.json().data);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Replay same Idempotency-Key (200)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{replayKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "**Expected:** 200, header `Idempotent-Replayed: true`, and the SAME transactionId. Nothing new is stored:\n```sql\nSELECT COUNT(*) FROM ingestion_db.transaction WHERE external_ref = '<replayKey>';   -- still 1\n```\nLog: `Idempotent replay for key ...`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"ACC-PM-{{run}}\",\n  \"destinationAccountId\": \"EXT-PM-1\",\n  \"amount\": 100,\n  \"currency\": \"USD\",\n  \"type\": \"WIRE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"same transactionId returned\", () => pm.expect(pm.response.json().data).to.eql(pm.collectionVariables.get(\"txnId\")));",
+                  "pm.test(\"replay header\", () => pm.expect(pm.response.headers.get(\"Idempotent-Replayed\")).to.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Missing Idempotency-Key (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"ACC-PM-{{run}}\",\n  \"destinationAccountId\": \"EXT-PM-1\",\n  \"amount\": 100,\n  \"currency\": \"USD\",\n  \"type\": \"WIRE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Invalid body (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "Negative amount and lowercase currency fail Bean Validation.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"ACC-PM-{{run}}\",\n  \"destinationAccountId\": \"EXT-PM-1\",\n  \"amount\": -5,\n  \"currency\": \"usd\",\n  \"type\": \"WIRE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. Unsupported currency (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{fixKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "Business rejection. The Redis key is DELETED so the client can fix the request and retry with the same key (next request).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"ACC-PM-{{run}}\",\n  \"destinationAccountId\": \"EXT-PM-1\",\n  \"amount\": 100,\n  \"currency\": \"XYZ\",\n  \"type\": \"WIRE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"fixKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. Retry fixed request with the same key (202)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{fixKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"ACC-PM-{{run}}\",\n  \"destinationAccountId\": \"EXT-PM-1\",\n  \"amount\": 100,\n  \"currency\": \"USD\",\n  \"type\": \"WIRE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. Unknown account (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "The mock account check accepts only ids starting with ACC- or EXT-.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"BOGUS-1\",\n  \"destinationAccountId\": \"EXT-PM-1\",\n  \"amount\": 100,\n  \"currency\": \"USD\",\n  \"type\": \"WIRE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "8. Future-dated transaction (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"ACC-PM-{{run}}\",\n  \"destinationAccountId\": \"EXT-PM-1\",\n  \"amount\": 100,\n  \"currency\": \"USD\",\n  \"type\": \"WIRE\",\n  \"txnTimestamp\": \"{{futureTs}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"futureTs\", new Date(Date.now() + 86400000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"rejected\", () => pm.expect(pm.response.code).to.be.oneOf([400, 422]));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 Phase 3 - Batch CSV ingestion",
+      "description": "Spring Batch upload + rejected-row report.",
+      "item": [
+        {
+          "name": "1. Upload clean CSV",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ingestion/batches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ingestion",
+                "batches"
+              ]
+            },
+            "description": "Body -> form-data -> key `file` (type File) -> select **docs/testData/sentinel_demo_data.csv** from the repo (re-select it if Postman shows the file as missing).\n\n**Expected:** 202 + batchId (saved to `batchId`). The job runs asynchronously; call the status request next.\n\nLogs (ingestion): `Batch <id> COMPLETED: total=.., accepted=.., failed=..` and, for bad rows, `Batch <id> line N rejected: <reason>`.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "docs/testData/sentinel_demo_data.csv"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.collectionVariables.set(\"batchId\", pm.response.json().data);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Batch status (99 accepted)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ingestion/batches/{{batchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ingestion",
+                "batches",
+                "{{batchId}}"
+              ]
+            },
+            "description": "If status is still PROCESSING, send again after a second.\n\n```sql\nSELECT status, total_records, failed_records, completed_at FROM ingestion_db.ingestion_batch WHERE id = '<batchId>';\nSELECT line_number, error_reason FROM ingestion_db.ingestion_error WHERE batch_id = '<batchId>' ORDER BY line_number;\nSELECT COUNT(*) FROM ingestion_db.transaction WHERE batch_id = '<batchId>';\n```"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"COMPLETED\", () => pm.expect(d.status).to.eql(\"COMPLETED\"));",
+                  "pm.test(\"total 99\", () => pm.expect(d.totalRecords).to.eql(99));",
+                  "pm.test(\"failed 0\", () => pm.expect(d.failedRecords).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Upload CSV with bad rows",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ingestion/batches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ingestion",
+                "batches"
+              ]
+            },
+            "description": "Body -> form-data -> key `file` (type File) -> select **docs/testData/sentinel_demo_with_error_entry.csv** from the repo (re-select it if Postman shows the file as missing).\n\n**Expected:** 202 + batchId (saved to `batchErrId`). The job runs asynchronously; call the status request next.\n\nLogs (ingestion): `Batch <id> COMPLETED: total=.., accepted=.., failed=..` and, for bad rows, `Batch <id> line N rejected: <reason>`.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "docs/testData/sentinel_demo_with_error_entry.csv"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.collectionVariables.set(\"batchErrId\", pm.response.json().data);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Batch status (12 rejected, with line numbers)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ingestion/batches/{{batchErrId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ingestion",
+                "batches",
+                "{{batchErrId}}"
+              ]
+            },
+            "description": "If status is still PROCESSING, send again after a second.\n\n```sql\nSELECT status, total_records, failed_records, completed_at FROM ingestion_db.ingestion_batch WHERE id = '<batchId>';\nSELECT line_number, error_reason FROM ingestion_db.ingestion_error WHERE batch_id = '<batchId>' ORDER BY line_number;\nSELECT COUNT(*) FROM ingestion_db.transaction WHERE batch_id = '<batchId>';\n```"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"COMPLETED\", () => pm.expect(d.status).to.eql(\"COMPLETED\"));",
+                  "pm.test(\"total 101\", () => pm.expect(d.totalRecords).to.eql(101));",
+                  "pm.test(\"failed 12\", () => pm.expect(d.failedRecords).to.eql(12));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 Phase 4 - Detection scenarios",
+      "description": "One planted scenario per rule. Every run uses new account ids (`{{run}}`), so you can repeat it. Run the folder in order (Collection Runner, or one by one).",
+      "item": [
+        {
+          "name": "CTR - 12 lakh cash deposit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "**Expected:** 202 Accepted. Within about a second, detection records a **CTR_THRESHOLD** hit.\n\n**Verify in MySQL** (Adminer http://localhost:8081, or `docker exec -it sentinel-mysql mysql -uroot -proot`):\n```sql\nSELECT rule_codes, risk_score, explanation FROM sentinel_detection.aml_alert\nWHERE account_id = 'ACC-CTR-<run>' ORDER BY created_at DESC;\n```\n**Verify in the detection log:** `AML hit on account ACC-CTR-<run> (txn ...): rules=[CTR_THRESHOLD...] score=...`\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-CASH\",\n  \"destinationAccountId\": \"ACC-CTR-{{run}}\",\n  \"amount\": 1200000,\n  \"currency\": \"INR\",\n  \"type\": \"CASH_DEPOSIT\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// first request of the detection folder: new account-id suffix for this run",
+                  "pm.collectionVariables.set(\"run\", Math.random().toString(36).slice(2, 8).toUpperCase());",
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Structuring 1/4 - USD 9100",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "Part of the structuring scenario: send all four in order.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-S1\",\n  \"destinationAccountId\": \"ACC-STR-{{run}}\",\n  \"amount\": 9100,\n  \"currency\": \"USD\",\n  \"type\": \"CASH_DEPOSIT\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (20 * 3600 * 1000 + 300000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Structuring 2/4 - USD 9400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "Part of the structuring scenario: send all four in order.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-S2\",\n  \"destinationAccountId\": \"ACC-STR-{{run}}\",\n  \"amount\": 9400,\n  \"currency\": \"USD\",\n  \"type\": \"CASH_DEPOSIT\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (14 * 3600 * 1000 + 300000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Structuring 3/4 - USD 9700",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "Part of the structuring scenario: send all four in order.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-S3\",\n  \"destinationAccountId\": \"ACC-STR-{{run}}\",\n  \"amount\": 9700,\n  \"currency\": \"USD\",\n  \"type\": \"CASH_DEPOSIT\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (7 * 3600 * 1000 + 300000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Structuring 4/4 - USD 9900",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "**Expected:** 202 Accepted. Within about a second, detection records a **STRUCTURING** hit.\n\n**Verify in MySQL** (Adminer http://localhost:8081, or `docker exec -it sentinel-mysql mysql -uroot -proot`):\n```sql\nSELECT rule_codes, risk_score, explanation FROM sentinel_detection.aml_alert\nWHERE account_id = 'ACC-STR-<run>' ORDER BY created_at DESC;\n```\n**Verify in the detection log:** `AML hit on account ACC-STR-<run> (txn ...): rules=[STRUCTURING...] score=...`\nFires from deposit 3 onwards (threshold = 3 in 24 h). Deposits come from DIFFERENT senders: the rule looks at the receiving account.\n\n**Redis window:** `ZRANGE aml:win:struct:ACC-STR-<run> 0 -1 WITHSCORES` -> members `txnId|amountInr`, scores = event time (ms).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-S4\",\n  \"destinationAccountId\": \"ACC-STR-{{run}}\",\n  \"amount\": 9900,\n  \"currency\": \"USD\",\n  \"type\": \"CASH_DEPOSIT\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (0 * 3600 * 1000 + 300000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rapid movement 1/2 - 50 L in (30 h ago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "Credit. Also fires CTR on its own (50 L ≥ 8.3 L).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-BIG\",\n  \"destinationAccountId\": \"ACC-RAP-{{run}}\",\n  \"amount\": 5000000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (30 * 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rapid movement 2/2 - 42 L out (now)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "**Expected:** 202 Accepted. Within about a second, detection records a **RAPID_MOVEMENT** hit.\n\n**Verify in MySQL** (Adminer http://localhost:8081, or `docker exec -it sentinel-mysql mysql -uroot -proot`):\n```sql\nSELECT rule_codes, risk_score, explanation FROM sentinel_detection.aml_alert\nWHERE account_id = 'ACC-RAP-<run>' ORDER BY created_at DESC;\n```\n**Verify in the detection log:** `AML hit on account ACC-RAP-<run> (txn ...): rules=[RAPID_MOVEMENT...] score=...`\nExpect `rule_codes = RAPID_MOVEMENT,CTR_THRESHOLD` and **risk_score = 82.50** (1 − 0.25 × 0.70).\n\n**Redis:** `ZRANGE aml:win:cr:ACC-RAP-<run> 0 -1` and `ZRANGE aml:win:dr:ACC-RAP-<run> 0 -1`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"ACC-RAP-{{run}}\",\n  \"destinationAccountId\": \"EXT-ABROAD\",\n  \"amount\": 4200000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "High-risk country (IR)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "**Expected:** 202 Accepted. Within about a second, detection records a **HIGH_RISK_JURISDICTION** hit.\n\n**Verify in MySQL** (Adminer http://localhost:8081, or `docker exec -it sentinel-mysql mysql -uroot -proot`):\n```sql\nSELECT rule_codes, risk_score, explanation FROM sentinel_detection.aml_alert\nWHERE account_id = 'ACC-HRC-<run>' ORDER BY created_at DESC;\n```\n**Verify in the detection log:** `AML hit on account ACC-HRC-<run> (txn ...): rules=[HIGH_RISK_JURISDICTION...] score=...`\nWatchlist: `SELECT * FROM sentinel_detection.watchlist_entry;`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"ACC-HRC-{{run}}\",\n  \"destinationAccountId\": \"EXT-IR-1\",\n  \"amount\": 25000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\",\n  \"counterpartyCountry\": \"IR\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "High-risk fuzzy name (misspelled)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "**Expected:** 202 Accepted. Within about a second, detection records a **HIGH_RISK_JURISDICTION** hit.\n\n**Verify in MySQL** (Adminer http://localhost:8081, or `docker exec -it sentinel-mysql mysql -uroot -proot`):\n```sql\nSELECT rule_codes, risk_score, explanation FROM sentinel_detection.aml_alert\nWHERE account_id = 'ACC-HRN-<run>' ORDER BY created_at DESC;\n```\n**Verify in the detection log:** `AML hit on account ACC-HRN-<run> (txn ...): rules=[HIGH_RISK_JURISDICTION...] score=...`\nExplanation shows `matches watchlisted 'ZENITH SHELL HOLDINGS LTD' (similarity 0.95)`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"ACC-HRN-{{run}}\",\n  \"destinationAccountId\": \"EXT-AE-1\",\n  \"amount\": 2500,\n  \"currency\": \"USD\",\n  \"type\": \"WIRE\",\n  \"counterpartyName\": \"Zenith Shel Holdings Ltd.\",\n  \"counterpartyCountry\": \"AE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Round amount 1/6 - 5,00,000 (6 days ago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "Part of the round-amount scenario.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"ACC-RND-{{run}}\",\n  \"destinationAccountId\": \"EXT-R6\",\n  \"amount\": 500000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (6 * 24 * 3600 * 1000 + 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Round amount 2/6 - 5,00,000 (5 days ago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "Part of the round-amount scenario.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"ACC-RND-{{run}}\",\n  \"destinationAccountId\": \"EXT-R5\",\n  \"amount\": 500000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (5 * 24 * 3600 * 1000 + 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Round amount 3/6 - 5,00,000 (4 days ago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "Part of the round-amount scenario.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"ACC-RND-{{run}}\",\n  \"destinationAccountId\": \"EXT-R4\",\n  \"amount\": 500000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (4 * 24 * 3600 * 1000 + 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Round amount 4/6 - 5,00,000 (3 days ago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "Part of the round-amount scenario.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"ACC-RND-{{run}}\",\n  \"destinationAccountId\": \"EXT-R3\",\n  \"amount\": 500000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (3 * 24 * 3600 * 1000 + 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Round amount 5/6 - 5,00,000 (2 days ago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "Part of the round-amount scenario.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"ACC-RND-{{run}}\",\n  \"destinationAccountId\": \"EXT-R2\",\n  \"amount\": 500000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (2 * 24 * 3600 * 1000 + 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Round amount 6/6 - 5,00,000 (1 days ago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "**Expected:** 202 Accepted. Within about a second, detection records a **ROUND_AMOUNT** hit.\n\n**Verify in MySQL** (Adminer http://localhost:8081, or `docker exec -it sentinel-mysql mysql -uroot -proot`):\n```sql\nSELECT rule_codes, risk_score, explanation FROM sentinel_detection.aml_alert\nWHERE account_id = 'ACC-RND-<run>' ORDER BY created_at DESC;\n```\n**Verify in the detection log:** `AML hit on account ACC-RND-<run> (txn ...): rules=[ROUND_AMOUNT...] score=...`\nFires from transfer 5 onwards (threshold = 5 in 7 days). Redis: `ZRANGE aml:win:round:ACC-RND-<run> 0 -1`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"ACC-RND-{{run}}\",\n  \"destinationAccountId\": \"EXT-R1\",\n  \"amount\": 500000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (1 * 24 * 3600 * 1000 + 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Behavioral history 1/10 - 15,000 (10 days ago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "Builds 10 days of history (one Redis hash per day: `HGETALL aml:day:ACC-BEH-<run>:<yyyyMMdd>`).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-SALARY\",\n  \"destinationAccountId\": \"ACC-BEH-{{run}}\",\n  \"amount\": 15000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (10 * 24 * 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Behavioral history 2/10 - 15,000 (9 days ago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "History.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-SALARY\",\n  \"destinationAccountId\": \"ACC-BEH-{{run}}\",\n  \"amount\": 15000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (9 * 24 * 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Behavioral history 3/10 - 15,000 (8 days ago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "History.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-SALARY\",\n  \"destinationAccountId\": \"ACC-BEH-{{run}}\",\n  \"amount\": 15000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (8 * 24 * 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Behavioral history 4/10 - 15,000 (7 days ago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "History.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-SALARY\",\n  \"destinationAccountId\": \"ACC-BEH-{{run}}\",\n  \"amount\": 15000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (7 * 24 * 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Behavioral history 5/10 - 15,000 (6 days ago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "History.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-SALARY\",\n  \"destinationAccountId\": \"ACC-BEH-{{run}}\",\n  \"amount\": 15000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (6 * 24 * 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Behavioral history 6/10 - 15,000 (5 days ago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "History.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-SALARY\",\n  \"destinationAccountId\": \"ACC-BEH-{{run}}\",\n  \"amount\": 15000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (5 * 24 * 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Behavioral history 7/10 - 15,000 (4 days ago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "History.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-SALARY\",\n  \"destinationAccountId\": \"ACC-BEH-{{run}}\",\n  \"amount\": 15000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (4 * 24 * 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Behavioral history 8/10 - 15,000 (3 days ago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "History.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-SALARY\",\n  \"destinationAccountId\": \"ACC-BEH-{{run}}\",\n  \"amount\": 15000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (3 * 24 * 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Behavioral history 9/10 - 15,000 (2 days ago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "History.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-SALARY\",\n  \"destinationAccountId\": \"ACC-BEH-{{run}}\",\n  \"amount\": 15000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (2 * 24 * 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Behavioral history 10/10 - 15,000 (1 days ago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "History.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-SALARY\",\n  \"destinationAccountId\": \"ACC-BEH-{{run}}\",\n  \"amount\": 15000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (1 * 24 * 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Behavioral - recompute 90-day baseline",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detection/baseline/recompute",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "detection",
+                "baseline",
+                "recompute"
+              ]
+            },
+            "description": "Runs the nightly job now. Then `redis-cli GET aml:baseline:ACC-BEH-<run>` -> `15000.00`. Log: `Baseline job finished: N accounts updated`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Behavioral - 2 lakh spike today",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "**Expected:** 202 Accepted. Within about a second, detection records a **BEHAVIORAL_DEVIATION** hit.\n\n**Verify in MySQL** (Adminer http://localhost:8081, or `docker exec -it sentinel-mysql mysql -uroot -proot`):\n```sql\nSELECT rule_codes, risk_score, explanation FROM sentinel_detection.aml_alert\nWHERE account_id = 'ACC-BEH-<run>' ORDER BY created_at DESC;\n```\n**Verify in the detection log:** `AML hit on account ACC-BEH-<run> (txn ...): rules=[BEHAVIORAL_DEVIATION...] score=...`\nExplanation: `moved ₹2,00,000 on <date>, 13.3x its 90-day average daily value of ₹15,000`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"ACC-BEH-{{run}}\",\n  \"destinationAccountId\": \"EXT-UNKNOWN\",\n  \"amount\": 200000,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Negative control - normal payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "Must NOT create any row in `aml_alert` for `ACC-OK-<run>`, but it IS in `processed_event`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"ACC-OK-{{run}}\",\n  \"destinationAccountId\": \"EXT-SHOP\",\n  \"amount\": 2350,\n  \"currency\": \"INR\",\n  \"type\": \"WIRE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "pm.test(\"returns transactionId\", () => pm.expect(pm.response.json().data).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reload rules + watchlist",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/detection/rules/reload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "detection",
+                "rules",
+                "reload"
+              ]
+            },
+            "description": "After changing a threshold in SQL, e.g. `UPDATE sentinel_detection.aml_rule SET threshold_amount = 2 WHERE rule_code='STRUCTURING';`, call this to apply it without a restart."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

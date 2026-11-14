@@ -74,9 +74,24 @@ services:
     networks:
       - sentinel-network
 
+  # 6. Redis GUI (Optional, browse sliding windows, idempotency keys, baselines)
+  #    Open http://localhost:5540 -> "Add Redis database" -> host: redis, port: 6379
+  redisinsight:
+    image: redis/redisinsight:2.66
+    container_name: sentinel-redisinsight
+    ports:
+      - "5540:5540"
+    volumes:
+      - redisinsight-data:/data   # keeps the saved connection
+    depends_on:
+      - redis
+    networks:
+      - sentinel-network
+
 volumes:
   mysql-data:
   artemis-data:
+  redisinsight-data:
 
 networks:
   sentinel-network:

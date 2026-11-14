@@ -37,7 +37,8 @@ Before writing any business code I needed real backing services (no mocks), beca
 | Port (host) | What | Notes |
 |---|---|---|
 | **8080** | gateway-service | the only port clients should use |
-| 8081 | Adminer | DB GUI |
+| 8081 | Adminer | MySQL GUI |
+| 5540 | RedisInsight | Redis GUI (added 2026-11-14) |
 | 8082 | customer-service | |
 | 8083 | ingestion-service | |
 | 8084 | detection-service | |
@@ -261,7 +262,7 @@ flowchart LR
 | `/actuator/health` on each service | ⚠️ | ingestion, detection, gateway, customer, alert-case have actuator; check each once alert-case is configured |
 | Multi-stage **Dockerfile** per service (non-root, layered jar) | ❌ | Do before Phase 8 |
 | "12 containers healthy" (services containerized too) | ❌ | Needs the Dockerfiles; add the services to compose with `condition: service_healthy` |
-| Redis Insight container | ❌ | optional |
+| Redis Insight container | ✅ | `redis/redisinsight:2.66` on :5540 |
 | `gitleaks` pre-commit hook | ❌ | cheap to add, blueprint asks for it |
 
 ---

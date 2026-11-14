@@ -128,27 +128,83 @@ git clone https://github.com/yourusername/sentinel-aml.git
 cd sentinel-aml
 ```
 
-**2. Start local infrastructure (Databases, Broker, Auth)**
+**2. Start the infrastructure (Docker)**
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
-*(This provisions MySQL, Redis, ActiveMQ, and Keycloak locally)*
+Wait until `docker compose ps` shows mysql, redis and activemq as `(healthy)`.
 
-**3. Build the backend services**
+**3. Build the services**
 ```bash
-cd services
-./mvnw clean install
+cd services && mvn clean install -DskipTests
 ```
 
-**4. Start the Frontend**
+**4. Start each service in its own terminal** (from `services/`)
 ```bash
-cd ../frontend
-npm install
-npm run dev
+java -jar customer-service/target/customer-service-1.0.0-SNAPSHOT.jar
 ```
+```bash
+java -jar ingestion-service/target/ingestion-service-1.0.0-SNAPSHOT.jar
+```
+```bash
+java -jar detection-service/target/detection-service-1.0.0-SNAPSHOT.jar
+```
+```bash
+java -jar gateway-service/target/gateway-service-1.0.0-SNAPSHOT.jar
+```
+
+**5. Test** with the Postman collection in `docs/postman/`. The step-by-step guide, including how to verify each request in MySQL, Redis, ActiveMQ and the logs, is in [`docs/manual-testing-guide.md`](docs/manual-testing-guide.md).
+
+**6. Unit tests**
+```bash
+cd services && mvn test
+```
+
+## 🖥️ Local web UIs & routes
+
+### Container consoles
+
+| Container | Web UI | Login | Notes |
+|---|---|---|---|
+| MySQL (`sentinel-mysql`, :3306) | **Adminer** → http://localhost:8081 | System `MySQL`, server `mysql`, user `root`, password `root` | Databases: `customer_db`, `ingestion_db`, `sentinel_detection` |
+| Redis (`sentinel-redis`, :6379) | **RedisInsight** → http://localhost:5540 | none | First time: *Add Redis database* → host `redis`, port `6379` |
+| ActiveMQ Artemis (`sentinel-activemq`, :61616) | **Artemis console** → http://localhost:8161/console | `admin` / `adminpassword` | *Artemis* tab → *Queues*: `sentinel.txn.ingested`, `sentinel.detection.hits`, `DLQ` |
+| Keycloak (`sentinel-keycloak`) | **Admin console** → http://localhost:8180/admin | `admin` / `admin` | Used from Phase 6 |
+
+Command-line alternatives: `docker exec -it sentinel-mysql mysql -uroot -proot --default-character-set=utf8mb4` and `docker exec -it sentinel-redis redis-cli`.
+
+### Services
+
+| Service | Port | Swagger UI | Actuator |
+|---|---|---|---|
+| gateway-service | **8080** (use this for API calls) | – | `/actuator/health`, `/actuator/info` |
+| customer-service | 8082 | http://localhost:8082/swagger-ui.html | `/actuator/health` |
+| ingestion-service | 8083 | http://localhost:8083/swagger-ui.html | `/actuator/health`, `/info`, `/metrics` |
+| detection-service | 8084 | http://localhost:8084/swagger-ui.html | `/actuator/health`, `/info`, `/metrics` |
+
+Raw OpenAPI JSON for each service: `http://localhost:<port>/v3/api-docs`.
+
+### API routes (all reachable through the gateway on :8080)
+
+| Method | Route | Service | Purpose |
+|---|---|---|---|
+| POST | `/api/v1/customers` | customer | Onboard a customer (PII encrypted, masked response) |
+| POST | `/api/v1/admin/seed-data` | customer | Generate 5,000 synthetic customers |
+| POST | `/api/v1/transactions` | ingestion | Ingest one transaction (`Idempotency-Key` header required) |
+| POST | `/api/v1/ingestion/batches` | ingestion | Upload a CSV (multipart field `file`) |
+| GET | `/api/v1/ingestion/batches/{id}` | ingestion | Batch status + rejected-row report |
+| GET | `/api/v1/rules` | detection | Active AML rules and parameters |
+| POST | `/api/v1/detection/rules/reload` | detection | Reload rules and watchlist from the DB |
+| POST | `/api/v1/detection/baseline/recompute` | detection | Run the 90-day baseline job now |
+
+Detection metrics: `http://localhost:8084/actuator/metrics/sentinel_ingest_to_detection_latency`, `sentinel_detection_latency`, `sentinel_rule_hits_total`.
+
+Flow diagrams for every route: open `docs/flows/index.html` in a browser.
 
 ## 📜 Documentation
 
 * **Architecture Decision Records (ADRs):** View our major technical decisions in `docs/ADR`.
 * **Repository Structure:** See `docs/repository_structure.md` for a breakdown of the monorepo layout.
+* **Manual run & test guide:** `docs/manual-testing-guide.md` (step by step, with the Postman collection in `docs/postman/`).
+* **Flow documentation:** Open `docs/flows/index.html` for per-flow diagrams with the classes, tables, Redis keys and queues involved.
 * **API Specs:** Swagger UI is available at `http://localhost:8080/swagger-ui.html` when the Gateway is running.
