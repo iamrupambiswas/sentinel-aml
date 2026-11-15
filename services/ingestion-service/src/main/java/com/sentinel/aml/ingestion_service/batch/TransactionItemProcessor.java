@@ -1,115 +1,96 @@
 package com.sentinel.aml.ingestion_service.batch;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sentinel.aml.ingestion_service.dto.ProcessedTransaction;
 import com.sentinel.aml.ingestion_service.dto.TransactionCsvDto;
-import com.sentinel.aml.ingestion_service.entity.IngestionError;
-import com.sentinel.aml.ingestion_service.entity.OutboxEvent;
-import com.sentinel.aml.ingestion_service.entity.Transaction;
-import com.sentinel.aml.ingestion_service.repository.IngestionErrorRepository;
-import com.sentinel.aml.ingestion_service.service.AccountValidationService;
-import com.sentinel.aml.ingestion_service.service.FxRateService;
+import com.sentinel.aml.ingestion_service.exception.InvalidTransactionException;
+import com.sentinel.aml.ingestion_service.support.TransactionFactory;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.item.ItemProcessor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
+import java.util.regex.Pattern;
 
+/**
+ * Validates and enriches one CSV row. Any problem is THROWN (never swallowed): the step's
+ * skip policy then routes the row to {@link CsvSkipListener}, which records it with its line
+ * number in ingestion_error (P4: never silently dropped).
+ */
 @Component
 @StepScope
 @RequiredArgsConstructor
-@Slf4j
 public class TransactionItemProcessor implements ItemProcessor<TransactionCsvDto, ProcessedTransaction> {
 
-    private final FxRateService fxRateService;
-    private final IngestionErrorRepository errorRepository;
-    private final ObjectMapper objectMapper;
+    private static final Pattern CURRENCY = Pattern.compile("^[A-Za-z]{3}$");
+    private static final Pattern COUNTRY = Pattern.compile("^[A-Za-z]{2,3}$");
+
+    private final TransactionFactory transactionFactory;
 
     @Value("#{jobParameters['batchId']}")
     private String batchId;
 
-    private final AccountValidationService accountValidationService;
-
     @Override
     public ProcessedTransaction process(TransactionCsvDto item) {
+        require(item.getSourceAccountId(), "sourceAccountId");
+        require(item.getDestinationAccountId(), "destinationAccountId");
+        require(item.getAmount(), "amount");
+        require(item.getCurrency(), "currency");
+        require(item.getType(), "type");
+
+        BigDecimal amount;
         try {
+            amount = new BigDecimal(item.getAmount().trim());
+        } catch (NumberFormatException e) {
+            throw new InvalidTransactionException("Amount is not a number: '" + item.getAmount() + "'");
+        }
+        if (!CURRENCY.matcher(item.getCurrency().trim()).matches()) {
+            throw new InvalidTransactionException("Currency must be a 3-letter ISO code: '" + item.getCurrency() + "'");
+        }
+        String country = item.getCounterpartyCountry();
+        if (country != null && !country.isBlank() && !COUNTRY.matcher(country.trim()).matches()) {
+            throw new InvalidTransactionException("Counterparty country must be an ISO code: '" + country + "'");
+        }
 
-            // 1. Basic structural check
-            if (item.getAmount() == null || item.getAmount().trim().isEmpty()) {
-                throw new IllegalArgumentException("Amount column is missing or empty");
+        return transactionFactory.build(new TransactionFactory.Input(
+                // Deterministic external ref: re-running the same batch can't double-insert (unique constraint)
+                "BATCH-" + batchId + "-L" + item.getLineNumber(),
+                batchId,
+                item.getSourceAccountId().trim(),
+                item.getDestinationAccountId().trim(),
+                amount,
+                item.getCurrency().trim(),
+                item.getType().trim(),
+                item.getCounterpartyName(),
+                country == null ? null : country.trim(),
+                parseTimestamp(item.getTxnTimestamp())));
+    }
+
+    private static void require(String value, String column) {
+        if (value == null || value.isBlank()) {
+            throw new InvalidTransactionException("Column '" + column + "' is missing or empty");
+        }
+    }
+
+    /** Accepts ISO instants (2026-11-14T10:15:30Z) or local date-times treated as UTC (2026-11-14T10:15:30). */
+    static Instant parseTimestamp(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String s = raw.trim();
+        try {
+            return Instant.parse(s);
+        } catch (DateTimeParseException ignored) {
+            try {
+                return LocalDateTime.parse(s).toInstant(ZoneOffset.UTC);
+            } catch (DateTimeParseException e) {
+                throw new InvalidTransactionException("txnTimestamp is not ISO-8601: '" + raw + "'");
             }
-
-            // 2. Redis Account Validation (Mocked)
-            if (!accountValidationService.isAccountValid(item.getSourceAccountId())) {
-                throw new IllegalArgumentException("Invalid Source Account ID: " + item.getSourceAccountId());
-            }
-            if (!accountValidationService.isAccountValid(item.getDestinationAccountId())) {
-                throw new IllegalArgumentException("Invalid Destination Account ID: " + item.getDestinationAccountId());
-            }
-
-            // Inside TransactionItemProcessor.process(TransactionCsvDto item)
-            if (item.getAmount() == null || item.getAmount().trim().isEmpty()) {
-                throw new IllegalArgumentException("Amount column is missing or empty");
-            }
-
-            BigDecimal amount = new BigDecimal(item.getAmount());
-            if (amount.compareTo(BigDecimal.ZERO) <= 0) {
-                throw new IllegalArgumentException("Amount must be positive");
-            }
-
-            BigDecimal amountInr = fxRateService.normalizeToInr(amount, item.getCurrency());
-            String transactionId = UUID.randomUUID().toString();
-            LocalDateTime now = LocalDateTime.now();
-
-            Transaction txn = Transaction.builder()
-                    .id(transactionId)
-                    .externalRef("BATCH-" + UUID.randomUUID().toString())
-                    .sourceAccountId(item.getSourceAccountId())
-                    .destinationAccountId(item.getDestinationAccountId())
-                    .amount(amount)
-                    .currency(item.getCurrency())
-                    .amountInr(amountInr)
-                    .type(item.getType())
-                    .txnTimestamp(now)
-                    .build();
-
-            Map<String, Object> enrichedEvent = new HashMap<>();
-            enrichedEvent.put("transactionId", transactionId);
-            enrichedEvent.put("timestamp", now.toString());
-            enrichedEvent.put("amountInr", amountInr);
-            enrichedEvent.put("payload", item);
-
-            OutboxEvent outbox = OutboxEvent.builder()
-                    .id(UUID.randomUUID().toString())
-                    .aggregateType("TRANSACTION")
-                    .aggregateId(transactionId)
-                    .payload(objectMapper.writeValueAsString(enrichedEvent))
-                    .status("PENDING")
-                    .createdAt(now)
-                    .build();
-
-            return new ProcessedTransaction(txn, outbox);
-
-        } catch (Exception e) {
-            log.error("Error processing row in batch {}: {}", batchId, e.getMessage());
-
-            IngestionError error = IngestionError.builder()
-                    .id(UUID.randomUUID().toString())
-                    .batchId(batchId)
-                    .rawData(item.toString())
-                    .errorReason(e.getMessage())
-                    .createdAt(LocalDateTime.now())
-                    .build();
-            errorRepository.save(error);
-
-            return null; // Returning null skips this item in the chunk
         }
     }
 }

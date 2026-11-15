@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Customer onboarding & PII · Sentinel AML flows</title>
+<link rel="stylesheet" href="assets/flows.css?v=3">
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" aria-label="Flow pages"></nav>
+<main>
+<div class="eyebrow">Customer</div>
+<h1>Customer onboarding & PII</h1>
+<p class="lede">How a new customer is validated, traced, encrypted at rest and returned with the national ID masked.</p>
+<div class="chips"><span class="chip">Service <b>customer-service :8082</b></span><span class="chip">Endpoint <b>POST /api/v1/customers</b></span><span class="chip">Schema <b>customer_db</b></span></div>
+<h2>Flow</h2><div class="diagram"><pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant A as LoggingAspect
+    participant CT as CustomerController
+    participant V as Bean Validation
+    participant S as CustomerProfileServiceImpl
+    participant R as CustomerRepository
+    participant PC as PIIAttributeConverter
+    participant DB as customer_db.customer
+    C->>A: POST /api/v1/customers
+    A->>A: traceId into MDC, log request
+    A->>CT: registerCustomer(request)
+    CT->>V: @Valid CustomerRegistrationRequest
+    alt invalid
+        V-->>C: 400 via GlobalExceptionHandler
+    else valid
+        CT->>S: onboardCustomer(request)
+        S->>R: save(Customer, riskRating MEDIUM)
+        R->>PC: convertToDatabaseColumn(idNumber)
+        PC-->>R: base64(IV + ciphertext + tag)
+        R->>DB: INSERT
+        S-->>CT: Customer
+        CT-->>C: 201 ApiResponse of CustomerResponse (masked id)
+    end
+</pre></div><h2>Step by step</h2><ol class="steps"><li><code>LoggingAspect.logAround()</code> intercepts every <code>@RestController</code> method, puts an 8-character trace id in the MDC and logs the request.</li><li><code>CustomerController.registerCustomer()</code> receives the body; <code>@Valid</code> triggers the constraints on <code>CustomerRegistrationRequest</code>.</li><li>A violation raises <code>MethodArgumentNotValidException</code> (or <code>HttpMessageNotReadableException</code> for an unknown enum), which <code>GlobalExceptionHandler</code> turns into a 400 envelope.</li><li><code>CustomerProfileServiceImpl.onboardCustomer()</code> builds the entity with a new UUID, <code>riskRating = MEDIUM</code> and <code>onboardedAt = now</code>.</li><li>When Hibernate writes the row, <code>PIIAttributeConverter.convertToDatabaseColumn()</code> encrypts <code>idNumber</code> with AES-256-GCM and a random 12-byte IV.</li><li>The controller maps the saved entity to <code>CustomerResponse.from()</code>, which masks the ID number, and returns <code>201 Created</code>.</li></ol><h2>Components</h2><div class="table-wrap"><table><thead><tr><th>Component</th><th>Kind</th><th>Responsibility</th></tr></thead><tbody><tr><td><a href="../../services/common-lib/src/main/java/com/sentinel/aml/common/aspect/LoggingAspect.java"><code>LoggingAspect</code></a><span class="path">common-lib/…/aspect/LoggingAspect.java</span></td><td><span class="badge k-service">Aspect</span></td><td>Trace id, request and response logging, timing</td></tr><tr><td><a href="../../services/customer-service/src/main/java/com/sentinel/aml/controller/CustomerController.java"><code>CustomerController</code></a><span class="path">customer-service/…/controller/CustomerController.java</span></td><td><span class="badge k-controller">Controller</span></td><td>POST /api/v1/customers</td></tr><tr><td><a href="../../services/customer-service/src/main/java/com/sentinel/aml/dto/CustomerRegistrationRequest.java"><code>CustomerRegistrationRequest</code></a><span class="path">customer-service/…/dto/CustomerRegistrationRequest.java</span></td><td><span class="badge k-service">DTO / Event</span></td><td>Input record with Bean Validation constraints</td></tr><tr><td><a href="../../services/customer-service/src/main/java/com/sentinel/aml/service/impl/CustomerProfileServiceImpl.java"><code>CustomerProfileServiceImpl</code></a><span class="path">customer-service/…/service/impl/CustomerProfileServiceImpl.java</span></td><td><span class="badge k-service">Service</span></td><td>Builds and saves the customer with AML defaults</td></tr><tr><td><a href="../../services/customer-service/src/main/java/com/sentinel/aml/repository/CustomerRepository.java"><code>CustomerRepository</code></a><span class="path">customer-service/…/repository/CustomerRepository.java</span></td><td><span class="badge k-repo">Repository</span></td><td>Spring Data JPA repository</td></tr><tr><td><a href="../../services/customer-service/src/main/java/com/sentinel/aml/entity/Customer.java"><code>Customer</code></a><span class="path">customer-service/…/entity/Customer.java</span></td><td><span class="badge k-entity">Entity</span></td><td>Maps <code>customer</code>; <code>@Convert</code> on idNumber</td></tr><tr><td><a href="../../services/customer-service/src/main/java/com/sentinel/aml/converter/PIIAttributeConverter.java"><code>PIIAttributeConverter</code></a><span class="path">customer-service/…/converter/PIIAttributeConverter.java</span></td><td><span class="badge k-config">Config</span></td><td>AES-256-GCM encrypt / decrypt; key from <code>SENTINEL_ENCRYPTION_KEY</code></td></tr><tr><td><a href="../../services/customer-service/src/main/java/com/sentinel/aml/dto/CustomerResponse.java"><code>CustomerResponse</code></a><span class="path">customer-service/…/dto/CustomerResponse.java</span></td><td><span class="badge k-service">DTO / Event</span></td><td>API view, masks the ID number</td></tr><tr><td><a href="../../services/common-lib/src/main/java/com/sentinel/aml/common/exception/GlobalExceptionHandler.java"><code>GlobalExceptionHandler</code></a><span class="path">common-lib/…/exception/GlobalExceptionHandler.java</span></td><td><span class="badge k-config">Config</span></td><td>Error envelopes</td></tr></tbody></table></div><h2>Data touched</h2><div class="table-wrap"><table><thead><tr><th>Store</th><th>Object</th><th>Access</th><th>When</th></tr></thead><tbody><tr><td>MySQL customer_db</td><td><code>customer</code></td><td><span class="badge b-write">WRITE</span></td><td>Step 5: one INSERT; <code>id_number</code> holds ciphertext only</td></tr></tbody></table></div><h2>Validation rules</h2><div class="table-wrap"><table><thead><tr><th>Field</th><th>Constraint</th><th>Error message</th></tr></thead><tbody><tr><td>type</td><td><code>@NotNull</code>, enum RETAIL / CORPORATE / INSTITUTIONAL</td><td>Customer type is required</td></tr><tr><td>fullName</td><td><code>@NotBlank</code></td><td>Full name cannot be blank</td></tr><tr><td>idNumber</td><td><code>@NotBlank</code></td><td>National ID number cannot be blank</td></tr><tr><td>dob</td><td><code>@NotNull @Past</code></td><td>Date of birth must be a past date</td></tr><tr><td>nationality</td><td><code>@Pattern ^[A-Z]{3}$</code></td><td>Nationality must be a valid 3-letter ISO code</td></tr></tbody></table></div><h2>Encryption format</h2><div class="diagram"><pre class="mermaid">
+flowchart LR
+    P["plaintext idNumber"] --> E["AES/GCM/NoPadding<br/>256-bit key, random 12-byte IV"]
+    E --> S["stored = Base64( IV 12B | ciphertext | tag 16B )"]
+    S --> D["decrypt: split IV, verify tag, decrypt"]
+    D --> P2["plaintext (in the entity only)"]
+</pre></div><h2>Failure paths</h2><div class="table-wrap"><table><thead><tr><th>Situation</th><th>Result</th><th>Handled by</th></tr></thead><tbody><tr><td>Constraint violation</td><td>400, list of field messages</td><td>GlobalExceptionHandler.handleValidationExceptions</td></tr><tr><td>Unknown enum / malformed JSON</td><td>400</td><td>GlobalExceptionHandler.handleMessageNotReadable</td></tr><tr><td>Encryption key not 32 bytes</td><td>Application fails at startup</td><td>PIIAttributeConverter constructor</td></tr><tr><td>Ciphertext tampered in DB</td><td>Decryption throws (GCM tag mismatch)</td><td>PIIAttributeConverter.convertToEntityAttribute</td></tr></tbody></table></div><div class="note">Known gaps: no GET or search endpoints yet, and <code>LoggingAspect</code> logs the raw request payload, including the ID number. Both are tracked in ADR-002.</div>
+</main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/flows.js?v=3"></script>
+</body>
+</html>

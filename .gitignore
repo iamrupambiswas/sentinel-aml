@@ -82,4 +82,8 @@ load-tests/**/*.jtl
 load-tests/**/reports/
 load-tests/**/logs/
 
-docs/
+# docs/ IS tracked (ADRs, flow pages, test data). Only OS junk and the private files below are ignored.
+docs/**/.DS_Store
+# Personal, not for GitHub
+docs/*Blueprint*.pdf
+docs/linkedin/

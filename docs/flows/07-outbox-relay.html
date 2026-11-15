@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Outbox relay & event contract · Sentinel AML flows</title>
+<link rel="stylesheet" href="assets/flows.css?v=3">
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" aria-label="Flow pages"></nav>
+<main>
+<div class="eyebrow">Ingestion</div>
+<h1>Outbox relay & event contract</h1>
+<p class="lede">How rows written in the business transaction become ActiveMQ messages without being lost, and what those messages contain.</p>
+<div class="chips"><span class="chip">Service <b>ingestion-service</b></span><span class="chip">Destination <b>sentinel.txn.ingested</b></span><span class="chip">Interval <b>200 ms, 500 rows</b></span></div>
+<h2>Flow</h2><div class="diagram"><pre class="mermaid">
+flowchart LR
+    W["Streaming or batch write<br/>TransactionPersister"] -->|"same DB transaction"| OB[("outbox_event<br/>status PENDING")]
+    T["OutboxPoller.processOutboxEvents()<br/>@Scheduled fixedDelay 200 ms<br/>@Transactional"] -->|"findPage(PENDING, 500)<br/>order by created_at"| OB
+    T --> D["ObjectMapper.readValue<br/>TransactionIngestedEvent"]
+    D --> J["JmsTemplate.convertAndSend<br/>SentinelMessageConverters (JSON, _type)"]
+    J --> Q[("sentinel.txn.ingested")]
+    J -->|ok| P["status = PUBLISHED<br/>published_at = now"]
+    D -->|unreadable JSON| FL["status = FAILED"]
+    J -->|broker error| BR["break: retry next tick"]
+</pre></div><h2>Step by step</h2><ol class="steps"><li>Every 200 ms, <code>OutboxPoller.processOutboxEvents()</code> loads up to 500 PENDING rows, oldest first (index <code>idx_outbox_status_created</code>).</li><li>Each payload is deserialized into <code>TransactionIngestedEvent</code> and sent with <code>JmsTemplate.convertAndSend(MessagingConstants.TRANSACTION_QUEUE, event)</code>.</li><li>The shared converter writes JSON text and sets the <code>_type</code> property to the logical name <code>TransactionIngested</code>.</li><li>Sent rows are marked PUBLISHED with <code>published_at</code>; the status updates commit when the method returns.</li><li>A payload that can never be parsed is marked FAILED. A broker error stops the tick and leaves the remaining rows PENDING, in order.</li></ol><h2>Components</h2><div class="table-wrap"><table><thead><tr><th>Component</th><th>Kind</th><th>Responsibility</th></tr></thead><tbody><tr><td><a href="../../services/ingestion-service/src/main/java/com/sentinel/aml/ingestion_service/scheduler/OutboxPoller.java"><code>OutboxPoller</code></a><span class="path">ingestion-service/…/scheduler/OutboxPoller.java</span></td><td><span class="badge k-job">Job</span></td><td>Relay loop</td></tr><tr><td><a href="../../services/ingestion-service/src/main/java/com/sentinel/aml/ingestion_service/repository/OutboxEventRepository.java"><code>OutboxEventRepository</code></a><span class="path">ingestion-service/…/repository/OutboxEventRepository.java</span></td><td><span class="badge k-repo">Repository</span></td><td><code>findPage(status, Pageable)</code></td></tr><tr><td><a href="../../services/ingestion-service/src/main/java/com/sentinel/aml/ingestion_service/config/JmsConfig.java"><code>JmsConfig</code></a><span class="path">ingestion-service/…/config/JmsConfig.java</span></td><td><span class="badge k-config">Config</span></td><td>Registers the shared converter for Boot's JmsTemplate</td></tr><tr><td><a href="../../services/common-lib/src/main/java/com/sentinel/aml/common/messaging/SentinelMessageConverters.java"><code>SentinelMessageConverters</code></a><span class="path">common-lib/…/messaging/SentinelMessageConverters.java</span></td><td><span class="badge k-config">Config</span></td><td>Jackson TEXT converter + type-id mappings</td></tr><tr><td><a href="../../services/common-lib/src/main/java/com/sentinel/aml/common/event/TransactionIngestedEvent.java"><code>TransactionIngestedEvent</code></a><span class="path">common-lib/…/event/TransactionIngestedEvent.java</span></td><td><span class="badge k-service">DTO / Event</span></td><td>Message contract</td></tr><tr><td><a href="../../services/common-lib/src/main/java/com/sentinel/aml/common/constants/MessagingConstants.java"><code>MessagingConstants</code></a><span class="path">common-lib/…/constants/MessagingConstants.java</span></td><td><span class="badge k-config">Config</span></td><td>Destination names, type ids</td></tr></tbody></table></div><h2>Data touched</h2><div class="table-wrap"><table><thead><tr><th>Store</th><th>Object</th><th>Access</th><th>When</th></tr></thead><tbody><tr><td>MySQL ingestion_db</td><td><code>outbox_event</code></td><td><span class="badge b-rw">READ/WRITE</span></td><td>Read PENDING pages, update status / published_at</td></tr><tr><td>ActiveMQ</td><td>queue <code>sentinel.txn.ingested</code></td><td><span class="badge b-write">WRITE</span></td><td>One persistent message per row</td></tr></tbody></table></div><h2>Outbox row lifecycle</h2><div class="diagram"><pre class="mermaid">
+stateDiagram-v2
+    [*] --> PENDING: inserted with the transaction
+    PENDING --> PUBLISHED: sent to broker
+    PENDING --> FAILED: payload unreadable
+    PENDING --> PENDING: broker down, retried next tick
+    PUBLISHED --> PUBLISHED: crash before commit means re-send (consumer dedups)
+</pre></div><h2>Message on the wire</h2><pre class="code">JMS property  _type = TransactionIngested
+Body (TextMessage):
+{
+  &quot;eventId&quot;: &quot;e1c0...&quot;,
+  &quot;transactionId&quot;: &quot;aed44bb8-64c3-4226-9947-c5f63604bf03&quot;,
+  &quot;externalRef&quot;: &quot;3f0c6c1e-...&quot;,
+  &quot;sourceAccountId&quot;: &quot;ACC-TRADE-01&quot;,
+  &quot;destinationAccountId&quot;: &quot;EXT-TEH-77&quot;,
+  &quot;amount&quot;: 2500,
+  &quot;currency&quot;: &quot;USD&quot;,
+  &quot;amountInr&quot;: 208750.0000,
+  &quot;type&quot;: &quot;WIRE&quot;,
+  &quot;counterpartyName&quot;: &quot;Zenith Shell Holdings Ltd&quot;,
+  &quot;counterpartyCountry&quot;: &quot;AE&quot;,
+  &quot;txnTimestamp&quot;: &quot;2026-11-14T10:15:30Z&quot;,
+  &quot;ingestedAt&quot;: &quot;2026-11-14T10:15:30.412Z&quot;
+}</pre><h2>Delivery guarantees</h2><div class="table-wrap"><table><thead><tr><th>Failure</th><th>Effect</th><th>Why it is safe</th></tr></thead><tbody><tr><td>Crash after commit, before poll</td><td>Row stays PENDING</td><td>Sent on the next tick after restart</td></tr><tr><td>Crash after send, before status commit</td><td>Message sent twice</td><td>Detection skips duplicates via <code>processed_event</code></td></tr><tr><td>Broker unavailable</td><td>Rows wait</td><td>Order preserved, no busy retry loop</td></tr><tr><td>Two ingestion instances</td><td>Both could send the same rows</td><td>Not safe yet: needs SELECT ... FOR UPDATE SKIP LOCKED or ShedLock (Phase 8)</td></tr></tbody></table></div>
+</main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/flows.js?v=3"></script>
+</body>
+</html>

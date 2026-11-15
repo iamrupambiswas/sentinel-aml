@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Detection pipeline · Sentinel AML flows</title>
+<link rel="stylesheet" href="assets/flows.css?v=3">
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" aria-label="Flow pages"></nav>
+<main>
+<div class="eyebrow">Detection</div>
+<h1>Detection pipeline</h1>
+<p class="lede">From an ActiveMQ message to scored, explained rule hits: idempotent, per account, and atomic with its database writes.</p>
+<div class="chips"><span class="chip">Service <b>detection-service :8084</b></span><span class="chip">Consumes <b>sentinel.txn.ingested</b></span><span class="chip">Produces <b>sentinel.detection.hits</b></span></div>
+<h2>Flow</h2><div class="diagram"><pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant Q as sentinel.txn.ingested
+    participant C as TransactionConsumer
+    participant PE as processed_event
+    participant E as DetectionEngine
+    participant RC as RuleCacheService
+    participant RU as DetectionRule x6
+    participant RS as RiskScoringServiceImpl
+    participant AL as aml_alert
+    participant H as sentinel.detection.hits
+    Q->>C: TransactionIngestedEvent (transacted session)
+    C->>PE: existsById(transactionId)
+    alt duplicate
+        C-->>Q: return (ack, dropped)
+    else new
+        C->>E: evaluate(event)
+        E->>RC: getActiveRules()
+        E->>E: contextsFor(event): DEBIT source, CREDIT destination, skip EXT-
+        loop each context, each enabled rule
+            E->>RU: evaluate(ctx, config)
+            RU-->>E: Optional RuleHit
+        end
+        E->>RS: calculateAggregateScore(hits, multiplier)
+        E-->>C: List RuleHitsDetectedEvent
+        loop each account with hits
+            C->>AL: save(AmlAlert)
+            C->>H: convertAndSend(event)
+        end
+        C->>PE: save(ProcessedEvent)
+        C-->>Q: commit DB + JMS
+    end
+</pre></div><h2>Step by step</h2><ol class="steps"><li><code>TransactionConsumer.consumeTransaction()</code> is the only <code>@JmsListener</code> on <code>sentinel.txn.ingested</code> (concurrency 4–8). The JSON is converted to <code>TransactionIngestedEvent</code> by the shared converter.</li><li>Inside one <code>@Transactional</code>: if <code>processed_event</code> already contains the transaction id, the message is a redelivery and is dropped.</li><li><code>DetectionEngine.contextsFor()</code> builds one <code>TransactionContext</code> per internal account: DEBIT for the source and CREDIT for the destination. Accounts with the prefix <code>EXT-</code> are not monitored.</li><li>Every rule present in <code>RuleCacheService.getActiveRules()</code> runs for every context. A rule that throws is logged and skipped, so it cannot block the others.</li><li>Hits are sorted by weight. <code>RiskScoringServiceImpl</code> computes <code>min(100, (1 - prod(1 - w/100)) x 100 x m)</code>, where <code>m</code> comes from <code>CustomerRiskLookup</code>. The explanations are joined with " | ".</li><li>For every account with hits, an <code>AmlAlert</code> row is saved and a <code>RuleHitsDetectedEvent</code> is sent to <code>sentinel.detection.hits</code>.</li><li>The <code>ProcessedEvent</code> marker is saved in the same transaction; the timers <code>sentinel_detection_latency</code> and <code>sentinel_ingest_to_detection_latency</code> are recorded.</li></ol><h2>Account perspective</h2><div class="table-wrap"><table><thead><tr><th>Transfer</th><th>Contexts evaluated</th></tr></thead><tbody><tr><td>EXT-a &rarr; ACC-1</td><td>ACC-1 &middot; CREDIT</td></tr><tr><td>ACC-1 &rarr; EXT-b</td><td>ACC-1 &middot; DEBIT</td></tr><tr><td>ACC-1 &rarr; ACC-2</td><td>ACC-1 &middot; DEBIT and ACC-2 &middot; CREDIT</td></tr><tr><td>EXT-a &rarr; EXT-b</td><td>none</td></tr></tbody></table></div><h2>Components</h2><div class="table-wrap"><table><thead><tr><th>Component</th><th>Kind</th><th>Responsibility</th></tr></thead><tbody><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/config/JmsConfig.java"><code>JmsConfig</code></a><span class="path">detection-service/…/config/JmsConfig.java</span></td><td><span class="badge k-config">Config</span></td><td>Shared JSON converter, <code>Clock</code> bean, <code>@EnableJms</code></td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/consumer/TransactionConsumer.java"><code>TransactionConsumer</code></a><span class="path">detection-service/…/consumer/TransactionConsumer.java</span></td><td><span class="badge k-listener">Listener</span></td><td>Idempotency, persistence, publishing, metrics</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/repository/ProcessedEventRepository.java"><code>ProcessedEventRepository</code></a><span class="path">detection-service/…/repository/ProcessedEventRepository.java</span></td><td><span class="badge k-repo">Repository</span></td><td>Duplicate check and marker</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/engine/DetectionEngine.java"><code>DetectionEngine</code></a><span class="path">detection-service/…/engine/DetectionEngine.java</span></td><td><span class="badge k-service">Service</span></td><td>Contexts, rule loop, scoring, event building (no JMS, no DB)</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/engine/TransactionContext.java"><code>TransactionContext</code></a><span class="path">detection-service/…/engine/TransactionContext.java</span></td><td><span class="badge k-service">DTO / Event</span></td><td>Event seen from one account (account, direction, counterparty)</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/engine/RuleHit.java"><code>RuleHit</code></a><span class="path">detection-service/…/engine/RuleHit.java</span></td><td><span class="badge k-service">DTO / Event</span></td><td>ruleCode, weight, explanation, evidence ids, window bucket</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/service/impl/RuleCacheServiceImpl.java"><code>RuleCacheServiceImpl</code></a><span class="path">detection-service/…/service/impl/RuleCacheServiceImpl.java</span></td><td><span class="badge k-service">Service</span></td><td>Active rules snapshot</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/service/CustomerRiskLookup.java"><code>CustomerRiskLookup</code></a><span class="path">detection-service/…/service/CustomerRiskLookup.java</span></td><td><span class="badge k-service">Service</span></td><td>Risk multiplier from <code>aml:acct-risk:{acct}</code> (defaults to 1.0)</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/service/impl/RiskScoringServiceImpl.java"><code>RiskScoringServiceImpl</code></a><span class="path">detection-service/…/service/impl/RiskScoringServiceImpl.java</span></td><td><span class="badge k-service">Service</span></td><td>Aggregate score</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/entity/AmlAlert.java"><code>AmlAlert</code></a><span class="path">detection-service/…/entity/AmlAlert.java</span></td><td><span class="badge k-entity">Entity</span></td><td>Rule-hit record (<code>aml_alert</code>)</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/repository/AmlAlertRepository.java"><code>AmlAlertRepository</code></a><span class="path">detection-service/…/repository/AmlAlertRepository.java</span></td><td><span class="badge k-repo">Repository</span></td><td>save()</td></tr><tr><td><a href="../../services/common-lib/src/main/java/com/sentinel/aml/common/event/RuleHitsDetectedEvent.java"><code>RuleHitsDetectedEvent</code></a><span class="path">common-lib/…/event/RuleHitsDetectedEvent.java</span></td><td><span class="badge k-service">DTO / Event</span></td><td>Outgoing message</td></tr></tbody></table></div><h2>Data touched</h2><div class="table-wrap"><table><thead><tr><th>Store</th><th>Object</th><th>Access</th><th>When</th></tr></thead><tbody><tr><td>ActiveMQ</td><td><code>sentinel.txn.ingested</code></td><td><span class="badge b-read">READ</span></td><td>Consumed in a transacted session</td></tr><tr><td>MySQL sentinel_detection</td><td><code>processed_event</code></td><td><span class="badge b-rw">READ/WRITE</span></td><td>Duplicate check, then marker INSERT</td></tr><tr><td>MySQL sentinel_detection</td><td><code>aml_alert</code></td><td><span class="badge b-write">WRITE</span></td><td>One row per account with hits</td></tr><tr><td>Redis</td><td><code>aml:accounts:active</code></td><td><span class="badge b-write">WRITE</span></td><td>Every monitored account is added (used by the baseline job)</td></tr><tr><td>Redis</td><td><code>aml:win:*</code>, <code>aml:day:*</code>, <code>aml:baseline:*</code></td><td><span class="badge b-rw">READ/WRITE</span></td><td>Inside rules (see the rules page)</td></tr><tr><td>Redis</td><td><code>aml:acct-risk:{acct}</code></td><td><span class="badge b-read">READ</span></td><td>Risk multiplier</td></tr><tr><td>ActiveMQ</td><td><code>sentinel.detection.hits</code></td><td><span class="badge b-write">WRITE</span></td><td>One message per account with hits</td></tr></tbody></table></div><h2>Failure paths</h2><div class="table-wrap"><table><thead><tr><th>Situation</th><th>Result</th></tr></thead><tbody><tr><td>Duplicate delivery</td><td>Short-circuited by <code>processed_event</code></td></tr><tr><td>Exception after Redis writes</td><td>DB rollback + redelivery; Redis writes are idempotent (same member / field), so nothing is double counted</td></tr><tr><td>Single rule throws</td><td>Logged; other rules still evaluated</td></tr><tr><td>Message keeps failing</td><td>Redelivered until Artemis' max attempts, then moved to DLQ (explicit DLQ handling in Phase 5)</td></tr><tr><td>Redis down</td><td>Exception, rollback, redelivery later</td></tr></tbody></table></div>
+</main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/flows.js?v=3"></script>
+</body>
+</html>

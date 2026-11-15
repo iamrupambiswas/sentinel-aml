@@ -21,18 +21,23 @@ import java.util.UUID;
 public class LoggingAspect {
 
     private static final String TRACE_ID = "traceId";
+    private static final String TRACE_HEADER = "X-Trace-Id";
 
     @Pointcut("within(@org.springframework.web.bind.annotation.RestController *)")
     public void controllerPointcut() {}
 
     @Around("controllerPointcut()")
     public Object logAround(ProceedingJoinPoint joinPoint) throws Throwable {
-        // 1. Generate a unique short Trace ID for the request
-        String traceId = UUID.randomUUID().toString().substring(0, 8);
+        HttpServletRequest request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
+
+        // 1. Reuse the gateway's Trace ID (X-Trace-Id) so both log lines match; otherwise generate one
+        String incomingTraceId = request.getHeader(TRACE_HEADER);
+        String traceId = (incomingTraceId != null && !incomingTraceId.isBlank())
+                ? incomingTraceId
+                : UUID.randomUUID().toString().substring(0, 8);
         MDC.put(TRACE_ID, traceId);
 
         // 2. Extract HTTP Request Details
-        HttpServletRequest request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
         String httpMethod = request.getMethod();
         String uri = request.getRequestURI();
 
