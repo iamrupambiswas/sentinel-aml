@@ -13,8 +13,21 @@ import java.util.Map;
  */
 public interface SlidingWindowStore {
 
-    /** Atomically add {@code entry} to {@code key}, trim everything older than {@code window} and return what's left. */
+    /**
+     * Atomically add {@code entry} to {@code key} and return every entry within {@code window} of it on
+     * BOTH sides, i.e. scores in {@code [ts - window, ts + window]}, sorted by time.
+     * <p>
+     * Both sides, because one account's transactions may be evaluated out of time order (several
+     * consumer threads); the rule then checks every window of length {@code window} that contains the
+     * new entry. Old data is trimmed relative to the NEWEST entry minus {@link #retention(Duration)},
+     * never inside the new entry's own look-back, so late arrivals still see their window.
+     */
     List<WindowEntry> addAndGet(String key, WindowEntry entry, Duration window);
+
+    /** How far behind the newest entry window data is kept: late arrivals up to one window behind are fully evaluated. */
+    static Duration retention(Duration window) {
+        return window.multipliedBy(2);
+    }
 
     /** Read window contents without modifying them. */
     List<WindowEntry> read(String key, long fromMillis, long toMillis);

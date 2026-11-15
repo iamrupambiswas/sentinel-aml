@@ -1,10 +1,10 @@
-# Manual run & test guide (Phases 1–4)
+# Manual run & test guide (Phases 1–5)
 
 Everything here is done by hand: Docker Compose, one terminal per service, Postman for the API, and Adminer, `mysql`, `redis-cli`, the Artemis console and the service logs to see what happened inside.
 
 ```mermaid
 flowchart LR
-    S1["1. docker compose up"] --> S2["2. mvn install"] --> S3["3. start 4 services<br/>(4 terminals)"] --> S4["4. health checks"] --> S5["5. Postman<br/>folders 00 → 04"] --> S6["6. verify in<br/>MySQL · Redis · Artemis · logs"]
+    S1["1. docker compose up"] --> S2["2. mvn install"] --> S3["3. start 5 services<br/>(5 terminals)"] --> S4["4. health checks"] --> S5["5. Postman<br/>folders 00 → 08"] --> S6["6. verify in<br/>MySQL · Redis · Artemis · logs"]
 ```
 
 ---
@@ -47,6 +47,11 @@ Before any service starts, the service schemas don't exist yet. Each service cre
 
 ---
 
+> **Phase 5:** the broker now reads `infra/artemis/broker.properties` (5 delivery attempts with 1 s → 2 s → 4 s → 8 s backoff, then `DLQ.<queue>`). If your `sentinel-activemq` container was created before Phase 5, recreate it once so the file is mounted (queues survive, they live in the `artemis-data` volume):
+> ```bash
+> docker compose up -d activemq
+> ```
+
 ## 2. Build once
 
 ```bash
@@ -56,13 +61,15 @@ cd services
 mvn clean install -DskipTests
 ```
 
-`install` (not just `package`) puts `common-lib` into your local `~/.m2`, which the services depend on. Each service jar ends up in `services/<service>/target/<service>-1.0.0-SNAPSHOT.jar`.
+`install` (not just `package`) puts `common-lib` into your local `~/.m2`, which the services depend on. Drop `-DskipTests` to also run the tests; alert-case-service's 50-thread de-dup test starts a MySQL container (needs Docker; it is skipped, not failed, without it).
+
+> **Rebuild only with the services stopped.** `java -jar` reads classes from the jar lazily; overwriting a jar under a running service makes it fail with `NoClassDefFoundError`. Each service jar ends up in `services/<service>/target/<service>-1.0.0-SNAPSHOT.jar`.
 
 ---
 
 ## 3. Start the services: one terminal each
 
-Open **four terminals** in `services/`. Start them in this order (any order works, but this keeps the logs easy to follow).
+Open **five terminals** in `services/`. Start them in this order (any order works, but this keeps the logs easy to follow).
 
 **Terminal 1: customer-service (:8082)**
 ```bash
@@ -76,7 +83,11 @@ java -jar ingestion-service/target/ingestion-service-1.0.0-SNAPSHOT.jar
 ```bash
 java -jar detection-service/target/detection-service-1.0.0-SNAPSHOT.jar
 ```
-**Terminal 4: gateway-service (:8080)**
+**Terminal 4: alert-case-service (:8085)** (Phase 5)
+```bash
+java -jar alert-case-service/target/alert-case-service-1.0.0-SNAPSHOT.jar
+```
+**Terminal 5: gateway-service (:8080)**
 ```bash
 java -jar gateway-service/target/gateway-service-1.0.0-SNAPSHOT.jar
 ```
@@ -87,14 +98,15 @@ Alternatives: `mvn -pl customer-service spring-boot:run` from `services/`, or ru
 
 | Service | Log lines to look for |
 |---|---|
-| customer | `Successfully applied 1 migration to schema \`customer_db\`` → `Tomcat started on port 8082` → `Started CustomerServiceApplication` |
+| customer | `Successfully applied 1 migration to schema \`customer_db\`` → `Tomcat started on port 8082` → `Synced effective risk rating of N account(s) to Redis` → `Started CustomerServiceApplication` |
 | ingestion | `Successfully applied 4 migrations to schema \`ingestion_db\`` → `Running startup reconciliation for stale ingestion batches...` → `Started IngestionServiceApplication` |
-| detection | `Successfully applied 5 migrations to schema \`sentinel_detection\`` → `Watchlist loaded: 8 countries, 5 names` → `Loaded 6 active AML rules: [...]` → `Started DetectionServiceApplication` |
+| detection | `Successfully applied 6 migrations to schema \`sentinel_detection\`` → `Watchlist loaded: 8 countries, 5 names` → `Loaded 6 active AML rules: [...]` → `Started DetectionServiceApplication` |
+| alert-case | `Successfully applied 1 migration to schema \`alert_case_db\`` → `Tomcat started on port 8085` → `Started AlertCaseServiceApplication` |
 | gateway | `Tomcat started on port 8080` → `Started GatewayServiceApplication` |
 
 On later restarts Flyway says `Schema ... is up to date. No migration necessary.`
 
-In Adminer you should now see three databases: `customer_db`, `ingestion_db`, `sentinel_detection`, each with a `flyway_schema_history` table.
+In Adminer you should now see four databases: `customer_db`, `ingestion_db`, `sentinel_detection`, `alert_case_db`, each with a `flyway_schema_history` table.
 
 ---
 
@@ -104,10 +116,13 @@ In Adminer you should now see three databases: `customer_db`, `ingestion_db`, `s
    - `Sentinel-AML.postman_collection.json`
    - `Sentinel-AML-local.postman_environment.json`
 2. Top-right environment dropdown → **Sentinel AML – Local** (`baseUrl = http://localhost:8080`, the gateway).
-3. Run the folders **in order**: `00 → 01 → 02 → 03 → 04`. Every request has:
+3. Run the folders **in order**: `00 → 01 → … → 08` (05–08 are Phase 5). Every request has:
    - a **Tests** tab with assertions (green/red in the response panel),
    - a **Docs/description** with the exact SQL / redis-cli / log line to verify it.
-4. You can also run a whole folder with **Run folder** (Collection Runner). For folder 03, re-attach the CSV files first (see §6.3).
+4. You can also run a whole folder with **Run folder** (Collection Runner). For folder 03, re-attach the CSV files first (see §6.3). Folder 08 waits about 40 s in total (broker redelivery backoff). The whole collection also runs from the CLI, from the repository root (the CSV paths are relative to it):
+   ```bash
+   npx newman run docs/postman/Sentinel-AML.postman_collection.json -e docs/postman/Sentinel-AML-local.postman_environment.json
+   ```
 
 Variables the collection manages for you:
 
@@ -118,6 +133,10 @@ Variables the collection manages for you:
 | `fixKey` | Streaming request 5 | Retry-after-422 test |
 | `batchId`, `batchErrId` | Batch uploads | Batch status requests |
 | `idemKey` | Pre-request script, every POST | A fresh `Idempotency-Key` |
+| `p5CustomerId` | Folder 05 request 1 | Account and risk-rating requests |
+| `alertId`, `alertVersion`, `alertVersionNext` | Folder 06 | Alert detail and status workflow (optimistic lock) |
+| `ruleVersion`, `ruleVersionNew`, `ctrOriginal` | Folder 07 | `expectedVersion` for rule edits; revert value |
+| `dlqMessageId` | Folder 08 | Replay and delete of one dead letter |
 
 Look up the current values under **Collection → Variables** (needed to fill the SQL below).
 
@@ -148,6 +167,7 @@ docker exec -it sentinel-redis redis-cli
 | `HGETALL aml:day:<acct>:<yyyyMMdd>` | One day of activity (txnId → amount) |
 | `GET aml:baseline:<acct>` | 90-day average from the baseline job |
 | `TTL <key>` | Seconds until the key expires |
+| `GET aml:acct-risk:<acct>` | Effective risk rating published by customer-service (Phase 5) |
 
 Use `SCAN 0 MATCH aml:* COUNT 100` instead of `KEYS` on big datasets.
 
@@ -157,8 +177,9 @@ http://localhost:8161/console → **Artemis** tab → **Queues**:
 | Queue | Expected |
 |---|---|
 | `sentinel.txn.ingested` | Consumer count = number of detection listener threads; **Message count ≈ 0** (consumed instantly); *Messages acknowledged* grows with every transaction |
-| `sentinel.detection.hits` | **No consumer yet** (Phase 5), so *Message count* grows with every rule hit. Click the queue → *Browse* to read the JSON of a `RuleHitsDetected` event |
-| `DLQ` | Should stay empty. A message here = it failed repeatedly in detection; check the detection log |
+| `sentinel.detection.hits` | Consumer = alert-case-service threads; **Message count ≈ 0** |
+| `sentinel.rules.changed` (address, multicast) | One subscription per running detection pod |
+| `DLQ.sentinel.txn.ingested`, `DLQ.sentinel.detection.hits` (address `DLQ`) | Created on the first dead letter. A message here failed 5 times; see §6.5 to browse / replay / delete |
 
 ### Logs
 The terminal of each service. Useful searches (or pipe to a file with `| tee customer.log`):
@@ -173,15 +194,21 @@ The terminal of each service. Useful searches (or pipe to a file with `| tee cus
 | detection | `AML hit on account <acct> (txn <id>): rules=[...] score=..` | A rule fired |
 | detection | `Duplicate delivery ignored for transaction <id>` | Idempotent consumer at work |
 | detection | `Baseline job finished: N accounts updated` | Baseline recomputed |
+| detection | `Hot-reloaded rules after change to <CODE> vN by <who> (now loaded: vN, commit-to-live N ms)` | Rule change live on this pod |
+| detection | `Replayed N dead letter(s) from DLQ.<queue> to <queue>` | DLQ replay |
+| alert-case | `Event <id> (account <acct>, txn <id>): 1 new alert(s), 0 merged, 0 duplicate hit(s)` | De-dup outcome per event |
+| alert-case | `Alert <id> moved NEW -> UNDER_REVIEW` | Analyst workflow |
+| customer | `Published effective risk rating for N account(s) to Redis` | Rating change mirrored after commit |
+| gateway | `▶ [REQ] [<traceId>] ...` | Same trace id appears in the service log (`X-Trace-Id`) |
 
 ### Swagger UI (try requests in the browser)
-customer http://localhost:8082/swagger-ui.html · ingestion http://localhost:8083/swagger-ui.html · detection http://localhost:8084/swagger-ui.html. Swagger calls the service directly, not through the gateway, so the response is the same but the gateway is not exercised.
+customer http://localhost:8082/swagger-ui.html · ingestion http://localhost:8083/swagger-ui.html · detection http://localhost:8084/swagger-ui.html · alert-case http://localhost:8085/swagger-ui.html. Swagger calls the service directly, not through the gateway, so the response is the same but the gateway is not exercised.
 
 ### Metrics
 ```bash
 curl -s localhost:8084/actuator/metrics/sentinel_ingest_to_detection_latency
 ```
-`TOTAL_TIME / COUNT` = average seconds from ingestion to detection. Other metrics: `sentinel_detection_latency`, `sentinel_rule_hits_total` (`?tag=rule:STRUCTURING`).
+`TOTAL_TIME / COUNT` = average seconds from ingestion to detection. Other metrics: `sentinel_detection_latency`, `sentinel_rule_hits_total` (`?tag=rule:STRUCTURING`), `sentinel_rule_reload_lag` (detection), `sentinel_alerts_created_total`, `sentinel_alert_hits_merged_total`, `sentinel_alert_hits_duplicate_total` (alert-case, port 8085).
 
 ---
 
@@ -191,8 +218,8 @@ curl -s localhost:8084/actuator/metrics/sentinel_ingest_to_detection_latency
 
 | Request | Expect |
 |---|---|
-| Gateway / Customer / Ingestion / Detection health | `{"status":"UP"}` |
-| Active rules (via gateway) | 200, six rule codes. This proves the gateway route to detection |
+| Gateway / Customer / Ingestion / Detection / Alert-case health | `{"status":"UP"}` |
+| All rules with live version (via gateway) | 200, 7 rules (6 active, `24H_VELOCITY_LIMIT` disabled), each active one with `loadedVersion == version` |
 
 Without Postman:
 ```bash
@@ -304,16 +331,49 @@ SISMEMBER aml:accounts:active ACC-BEH-<run>
 
 Artemis: `sentinel.detection.hits` message count increased by the number of hits. *Browse* a message to see the JSON with `hits[].evidenceTxnIds` and `windowBucket`.
 
-**Try tuning a rule live**
-```sql
-UPDATE sentinel_detection.aml_rule SET threshold_amount = 2 WHERE rule_code = 'STRUCTURING';
-```
-Then send **Reload rules + watchlist**, and `GET /api/v1/rules` shows the new threshold. Now two near-threshold deposits are enough. Set it back to `3` afterwards.
+**Try tuning a rule live:** since Phase 5 this is an API call with an audit trail (folder 07, §6.5). Direct SQL still works but bypasses versioning and only takes effect after **Reload rules + watchlist** or the 5-minute refresh.
 
 **Try a duplicate delivery:** in the Artemis console you can't easily resend, but you can watch the protection. Each transaction appears **once** in `processed_event`, and:
 ```sql
 SELECT transaction_id, COUNT(*) FROM sentinel_detection.aml_alert GROUP BY transaction_id, account_id HAVING COUNT(*) > 1;   -- empty
 ```
+
+### 6.5 Folders 05–08: Phase 5
+
+**05 Customer risk to Redis.** Creates a customer, opens account `ACC-P5-<run>` as HIGH and changes ratings.
+```bash
+docker exec sentinel-redis redis-cli GET aml:acct-risk:ACC-P5-<run>
+```
+HIGH after request 2, MEDIUM after request 5 (account LOW, customer MEDIUM: the higher wins), HIGH after request 6. The customer terminal logs `Published effective risk rating for 1 account(s) to Redis` after each change.
+
+**06 Alerts and de-duplication.** Four structuring deposits, sent back to back, into `ACC-P5S-<run>`. Whichever two deposits are evaluated last both fire STRUCTURING, in any order. Request 5 expects **one** alert with `hitCount = 2`; request 6 expects one of the two hits to list all 4 deposits as evidence.
+```sql
+SELECT dedup_key, status, hit_count, risk_score, version FROM alert_case_db.alert WHERE account_id = 'ACC-P5S-<run>';
+SELECT event_id, rule_code, transaction_id, risk_score FROM alert_case_db.alert_hit
+ WHERE alert_id = (SELECT id FROM alert_case_db.alert WHERE account_id = 'ACC-P5S-<run>');
+```
+Requests 8–13 walk the workflow: NEW → ESCALATED is refused (409); a second analyst with an old `expectedVersion` gets 409; CLOSED is terminal.
+
+**07 Live rule tuning.** Raises CTR to ₹10 lakh, checks it is live, then reverts. Watch the detection terminal:
+```
+Hot-reloaded rules after change to CTR_THRESHOLD v2 by compliance.lead (now loaded: v2, commit-to-live 45 ms)
+```
+```sql
+SELECT version, threshold_amount, changed_by, change_reason, changed_at
+  FROM sentinel_detection.aml_rule_version WHERE rule_code = 'CTR_THRESHOLD' ORDER BY version;
+```
+
+**08 Dead letters.** Sends an unreadable message to `sentinel.txn.ingested`. In the detection terminal you see 5 failures about 1, 2, 4 and 8 s apart, then in the Artemis console the message sits in `DLQ.sentinel.txn.ingested` (address `DLQ`). The folder browses it, replays it (it fails 5 more times because it is still broken), and deletes it.
+
+> The poison-test endpoint only exists while `sentinel.ops.poison-test-enabled=true` (the local default; set `POISON_TEST_ENABLED=false` anywhere else).
+
+**50-thread concurrency test (X2)**, no services needed, only Docker:
+```bash
+cd services && mvn -pl alert-case-service test -Dtest=AlertDedupConcurrencyTest
+```
+Expected output line: `X2: 600 deliveries on 50 threads -> 24 alerts, 463 hits, 463 duplicates ignored, N deadlock retries, ~500 ms`, with N usually 0 and occasionally 1–3 (two threads creating the same brand-new alert; the retry mirrors broker redelivery, see ADR-005 §6).
+
+**Out-of-order evaluation (ADR-005 §11, fixed):** several detection threads can evaluate one account's transactions out of time order, especially when they are published in the same 200 ms outbox poll. Window rules now check every window that contains the new entry: they look at entries up to one window *after* it as well, and trimming is relative to the newest entry. So the result no longer depends on order, and folder 06 doesn't need to space its deposits. To see it, post a rapid-movement debit **before** its credit: the RAPID_MOVEMENT hit fires when the credit arrives.
 
 ---
 
@@ -331,6 +391,11 @@ SELECT transaction_id, COUNT(*) FROM sentinel_detection.aml_alert GROUP BY trans
 | Behavioral deviation doesn't fire | baseline not computed | send *recompute baseline* **after** the 10 history transactions were processed |
 | `?` instead of `₹` in mysql CLI | client charset | add `--default-character-set=utf8mb4` |
 | Postman batch upload 400 | file not attached | re-select the CSV in Body → form-data |
+| `NoClassDefFoundError` in a running service | its jar was rebuilt while it was running | stop it, rebuild, start again |
+| DLQ requests return `Unknown queue` (400) | only `sentinel.txn.ingested` and `sentinel.detection.hits` are allowed | use one of those names |
+| Poison message never reaches the DLQ | broker started without `broker.properties` (infinite immediate retries) | `docker compose up -d activemq` to recreate it with the mount |
+| `AlertDedupConcurrencyTest` skipped | Testcontainers found no Docker | start Docker / OrbStack; Testcontainers ≥ 1.21.4 is required for Docker 29 |
+| `Schema-validation: wrong column type ... enum` | an `@Enumerated` field without `@JdbcTypeCode(VARCHAR)` | add it (Hibernate 6 maps enums to MySQL `ENUM` by default) |
 
 ---
 
@@ -339,6 +404,7 @@ SELECT transaction_id, COUNT(*) FROM sentinel_detection.aml_alert GROUP BY trans
 ```sql
 -- keeps schemas, removes data (detection keeps rules & watchlist)
 TRUNCATE sentinel_detection.aml_alert; TRUNCATE sentinel_detection.processed_event;
+DELETE FROM alert_case_db.alert_hit; DELETE FROM alert_case_db.alert;
 ```
 ```bash
 docker exec sentinel-redis redis-cli FLUSHALL

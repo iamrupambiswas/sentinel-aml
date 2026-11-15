@@ -19,4 +19,13 @@ public final class MessagingConstants {
     public static final String TYPE_HEADER = "_type";
     public static final String TYPE_TRANSACTION_INGESTED = "TransactionIngested";
     public static final String TYPE_RULE_HITS_DETECTED = "RuleHitsDetected";
+    public static final String TYPE_RULES_CHANGED = "RulesChanged";
+
+    /**
+     * Prefix of the per-queue dead-letter queues (P21). The broker moves a message that failed
+     * max-delivery-attempts times to {@code DLQ.<queue>} (see infra/artemis/broker.properties).
+     */
+    public static final String DLQ_PREFIX = "DLQ.";
+    /** Address all dead-letter queues hang off; used to build fully-qualified queue names. */
+    public static final String DLQ_ADDRESS = "DLQ";
 }

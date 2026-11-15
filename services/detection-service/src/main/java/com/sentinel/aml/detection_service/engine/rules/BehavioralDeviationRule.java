@@ -11,6 +11,7 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Rule 5 (P10): today's value on the account > N x its 90-day average daily value.
@@ -28,6 +29,11 @@ public class BehavioralDeviationRule implements DetectionRule {
     @Override
     public String getRuleCode() {
         return CODE;
+    }
+
+    @Override
+    public Set<String> supportedParams() {
+        return Set.of("minDailyInr");
     }
 
     @Override

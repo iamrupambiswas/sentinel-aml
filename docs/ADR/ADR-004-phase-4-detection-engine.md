@@ -9,6 +9,8 @@
 | **Skills** | JMS consumer, Redis ZSET/HASH/SET + Lua, Strategy pattern, probabilistic scoring, Jaro-Winkler, `@Scheduled`, Micrometer, JUnit 5 + Mockito + AssertJ |
 | **LinkedIn post** | #5: rule engine + "the bugs that taught me the most" (`docs/linkedin/phase-4-detection-engine.md`) |
 
+> **Follow-up:** [ADR-005](ADR-005-phase-5-alerts-dedup-and-resilience.md) builds the consumer of `sentinel.detection.hits` (de-dup by `windowBucket`), live rule tuning (P13), the DLQ policy and the customer-risk multiplier feed. It also found and fixed out-of-order evaluation under concurrent consumers: window rules are now order-independent (ADR-005 §11).
+
 > **One-line recall:** *One `@JmsListener` takes `TransactionIngestedEvent`, short-circuits duplicates via `processed_event`, splits the transfer into a DEBIT view (sender) and a CREDIT view (receiver) for every internal account, runs each enabled `DetectionRule` (Strategy) against **atomic Lua sliding windows keyed by business time**, combines weights with `1 − ∏(1 − wᵢ/100)` and publishes `RuleHitsDetectedEvent` with evidence IDs.*
 
 ---
@@ -153,6 +155,8 @@ List<TransactionContext> contextsFor(TransactionIngestedEvent e) {
 ## 5. Atomic sliding windows (Redis + Lua)
 
 ### 5.1 The script (`resources/scripts/sliding_window.lua`)
+
+> **Changed in Phase 5** ([ADR-005 §11](ADR-005-phase-5-alerts-dedup-and-resilience.md)): the script now returns `[score − window, score + window]` and trims relative to the newest entry (retention 2 × window, TTL 2 × window + 1 h), so evaluation no longer depends on order. Below is the Phase 4 version.
 
 ```lua
 -- KEYS[1] = window key   ARGV[1] = score (event millis)   ARGV[2] = member

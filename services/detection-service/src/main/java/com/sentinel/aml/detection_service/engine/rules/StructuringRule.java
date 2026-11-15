@@ -10,6 +10,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /** Rule 2 (P7): >= N transactions just below the CTR threshold on one account within the window. */
 @Component
@@ -25,6 +26,11 @@ public class StructuringRule implements DetectionRule {
     }
 
     @Override
+    public Set<String> supportedParams() {
+        return Set.of("minAmountInr", "maxAmountInr");
+    }
+
+    @Override
     public Optional<RuleHit> evaluate(TransactionContext ctx, RuleConfig config) {
         BigDecimal min = config.decimal("minAmountInr", new BigDecimal("751500"));
         BigDecimal max = config.decimal("maxAmountInr", new BigDecimal("834999"));
@@ -33,8 +39,9 @@ public class StructuringRule implements DetectionRule {
             return Optional.empty();
         }
 
-        List<WindowEntry> window = store.addAndGet("aml:win:struct:" + ctx.accountId(),
+        List<WindowEntry> around = store.addAndGet("aml:win:struct:" + ctx.accountId(),
                 new WindowEntry(ctx.transactionId(), amount, ctx.txnTimeMillis()), config.window());
+        List<WindowEntry> window = RuleSupport.fullestWindowContaining(around, ctx.txnTimeMillis(), config.window());
 
         int required = config.threshold().intValue();
         if (window.size() < required) {

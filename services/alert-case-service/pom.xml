@@ -18,6 +18,11 @@
 	</properties>
 
     <dependencies>
+        <!-- Without a Bean Validation provider, @Valid on request bodies is silently ignored -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
@@ -59,6 +64,18 @@
             <groupId>com.sentinel.aml</groupId>
             <artifactId>common-lib</artifactId>
             <version>${project.version}</version>
+        </dependency>
+
+        <!-- X2: the 50-thread de-dup test runs against a real MySQL (unique keys + row locks are the point) -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>mysql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 

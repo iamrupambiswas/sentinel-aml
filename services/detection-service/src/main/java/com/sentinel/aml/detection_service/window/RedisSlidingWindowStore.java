@@ -35,10 +35,11 @@ public class RedisSlidingWindowStore implements SlidingWindowStore {
     @Override
     @SuppressWarnings("unchecked")
     public List<WindowEntry> addAndGet(String key, WindowEntry entry, Duration window) {
-        long ttl = window.plusHours(1).toMillis();
+        Duration retention = SlidingWindowStore.retention(window);
+        long ttl = retention.plusHours(1).toMillis();
         List<Object> raw = redis.execute(windowScript, List.of(key),
                 String.valueOf(entry.timestampMillis()), entry.encode(),
-                String.valueOf(window.toMillis()), String.valueOf(ttl));
+                String.valueOf(window.toMillis()), String.valueOf(ttl), String.valueOf(retention.toMillis()));
         return decodeWithScores(raw);
     }
 

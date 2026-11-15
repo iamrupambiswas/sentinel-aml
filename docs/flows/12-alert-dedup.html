@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alert de-duplication & analyst workflow · Sentinel AML flows</title>
+<link rel="stylesheet" href="assets/flows.css?v=3">
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" aria-label="Flow pages"></nav>
+<main>
+<div class="eyebrow">Alerts</div>
+<h1>Alert de-duplication & analyst workflow</h1>
+<p class="lede">How rule hits from detection become ONE alert per account, rule and time window, safely under concurrent consumers and redelivery, and how analysts move an alert through review.</p>
+<div class="chips"><span class="chip">Service <b>alert-case-service :8085</b></span><span class="chip">Consumes <b>sentinel.detection.hits</b></span><span class="chip">De-dup key <b>account:rule:windowBucket</b></span></div>
+<h2>Flow</h2><div class="diagram"><pre class="mermaid">
+flowchart LR
+    Q[("sentinel.detection.hits")] --> L["DetectionHitsConsumer.onHits()<br/>@JmsListener 4-8 threads<br/>transacted session"]
+    L --> S["AlertIngestService.ingest()<br/>@Transactional, hits sorted by key"]
+    S -->|"1. INSERT ... ON DUPLICATE KEY UPDATE<br/>(UNIQUE dedup_key)"| A[("alert")]
+    S -->|"2. SELECT ... FOR UPDATE"| A
+    S -->|"3. hit already there?"| H[("alert_hit<br/>UNIQUE event_id, rule_code")]
+    H -->|yes: redelivery| DUP["skip, counters untouched"]
+    S -->|"4. plain INSERT"| H
+    S -->|"5. UPDATE hit_count+1,<br/>GREATEST(risk_score)"| A
+    UI["Analyst / UI"] -->|"GET /api/v1/alerts<br/>PATCH /{id}/status"| C["AlertController -> AlertQueryService"]
+    C --> A
+    C --> H
+</pre><div class="caption">Steps 1-5 run in one MySQL transaction per event. Any exception rolls back the JMS session too, so the broker redelivers.</div></div><h2>Step by step</h2><ol class="steps"><li><code>DetectionHitsConsumer.onHits()</code> receives a <code>RuleHitsDetectedEvent</code> (one per account per transaction, 1+ rule hits).</li><li><code>AlertIngestService.ingest()</code> sorts the hits by de-dup key <code>accountId:ruleCode:windowBucket</code>, so two events touching the same alerts lock them in the same order.</li><li><code>INSERT ... ON DUPLICATE KEY UPDATE</code> creates the alert or does nothing. With <code>useAffectedRows=true</code> it returns 1 = created, 0 = existed.</li><li><code>SELECT id ... FOR UPDATE</code> takes the alert's exclusive row lock up front: concurrent hits for one alert queue instead of deadlocking.</li><li>Under that lock, if <code>(event_id, rule_code)</code> is already in <code>alert_hit</code> the event is a redelivery and is skipped. Otherwise the hit is attached with a plain INSERT.</li><li>One <code>UPDATE</code> moves the counters atomically: <code>hit_count + 1</code>, <code>risk_score = GREATEST(...)</code>, latest explanation, first/last transaction time.</li><li>Analysts list alerts (highest risk first), open one with all hits, and move it through the workflow. <code>@DynamicUpdate</code> + <code>@Version</code> mean a status change never overwrites a hit count the consumer added meanwhile.</li></ol><h2>Components</h2><div class="table-wrap"><table><thead><tr><th>Component</th><th>Kind</th><th>Responsibility</th></tr></thead><tbody><tr><td><a href="../../services/alert-case-service/src/main/java/com/sentinel/aml/alert_case_service/consumer/DetectionHitsConsumer.java"><code>DetectionHitsConsumer</code></a><span class="path">alert-case-service/…/consumer/DetectionHitsConsumer.java</span></td><td><span class="badge k-listener">Listener</span></td><td>Only listener on <code>sentinel.detection.hits</code>; metrics</td></tr><tr><td><a href="../../services/alert-case-service/src/main/java/com/sentinel/aml/alert_case_service/service/AlertIngestService.java"><code>AlertIngestService</code></a><span class="path">alert-case-service/…/service/AlertIngestService.java</span></td><td><span class="badge k-service">Service</span></td><td>Race-free de-dup with plain SQL (the 5 statements above)</td></tr><tr><td><a href="../../services/alert-case-service/src/main/java/com/sentinel/aml/alert_case_service/service/AlertQueryService.java"><code>AlertQueryService</code></a><span class="path">alert-case-service/…/service/AlertQueryService.java</span></td><td><span class="badge k-service">Service</span></td><td>Search, detail, status workflow, stats</td></tr><tr><td><a href="../../services/alert-case-service/src/main/java/com/sentinel/aml/alert_case_service/controller/AlertController.java"><code>AlertController</code></a><span class="path">alert-case-service/…/controller/AlertController.java</span></td><td><span class="badge k-controller">Controller</span></td><td><code>/api/v1/alerts</code> API</td></tr><tr><td><a href="../../services/alert-case-service/src/main/java/com/sentinel/aml/alert_case_service/entity/Alert.java"><code>Alert</code></a><span class="path">alert-case-service/…/entity/Alert.java</span></td><td><span class="badge k-entity">Entity</span></td><td><code>@DynamicUpdate</code>, <code>@Version</code>; status stored as VARCHAR</td></tr><tr><td><a href="../../services/alert-case-service/src/main/java/com/sentinel/aml/alert_case_service/entity/AlertStatus.java"><code>AlertStatus</code></a><span class="path">alert-case-service/…/entity/AlertStatus.java</span></td><td><span class="badge k-entity">Entity</span></td><td>Allowed transitions</td></tr><tr><td><a href="../../services/alert-case-service/src/main/java/com/sentinel/aml/alert_case_service/entity/AlertHit.java"><code>AlertHit</code></a><span class="path">alert-case-service/…/entity/AlertHit.java</span></td><td><span class="badge k-entity">Entity</span></td><td>Read-only (<code>@Immutable</code>) evidence row</td></tr><tr><td><a href="../../services/alert-case-service/src/main/java/com/sentinel/aml/alert_case_service/config/AlertCaseConfig.java"><code>AlertCaseConfig</code></a><span class="path">alert-case-service/…/config/AlertCaseConfig.java</span></td><td><span class="badge k-config">Config</span></td><td>Shared JMS converter, Clock, open security until Phase 6</td></tr></tbody></table></div><h2>Data touched</h2><div class="table-wrap"><table><thead><tr><th>Store</th><th>Object</th><th>Access</th><th>When</th></tr></thead><tbody><tr><td>ActiveMQ</td><td>queue <code>sentinel.detection.hits</code></td><td><span class="badge b-read">READ</span></td><td>One message per account per transaction with hits</td></tr><tr><td>MySQL alert_case_db</td><td><code>alert</code></td><td><span class="badge b-rw">READ/WRITE</span></td><td>Upsert, row lock, counters; analyst status changes</td></tr><tr><td>MySQL alert_case_db</td><td><code>alert_hit</code></td><td><span class="badge b-rw">READ/WRITE</span></td><td>Duplicate check and insert; read for alert detail</td></tr></tbody></table></div><h2>Alert status workflow</h2><div class="diagram"><pre class="mermaid">
+stateDiagram-v2
+    [*] --> NEW: first hit for account+rule+window
+    NEW --> UNDER_REVIEW
+    NEW --> CLOSED_FALSE_POSITIVE
+    NEW --> CLOSED_CONFIRMED
+    UNDER_REVIEW --> ESCALATED
+    UNDER_REVIEW --> CLOSED_FALSE_POSITIVE
+    UNDER_REVIEW --> CLOSED_CONFIRMED
+    ESCALATED --> CLOSED_FALSE_POSITIVE
+    ESCALATED --> CLOSED_CONFIRMED
+    CLOSED_FALSE_POSITIVE --> [*]
+    CLOSED_CONFIRMED --> [*]
+</pre><div class="caption">Any other move returns 409. New hits on a closed alert in the same window are still attached (hit_count grows) but do not reopen it.</div></div><h2>API</h2><div class="table-wrap"><table><thead><tr><th>Method & path</th><th>Purpose</th><th>Notes</th></tr></thead><tbody><tr><td><code>GET /api/v1/alerts?status=&accountId=&ruleCode=&page=&size=</code></td><td>List</td><td>Sorted by risk score desc, then last activity</td></tr><tr><td><code>GET /api/v1/alerts/{id}</code></td><td>Detail</td><td>All hits with evidence txn ids, allowed next statuses, dedup key</td></tr><tr><td><code>PATCH /api/v1/alerts/{id}/status</code></td><td>Workflow</td><td><code>{status, note, expectedVersion?}</code>; 409 on illegal move or stale version</td></tr><tr><td><code>GET /api/v1/alerts/stats</code></td><td>Noise removed</td><td>alerts, hits, hitsPerAlert, count by status</td></tr></tbody></table></div><h2>Failure paths</h2><div class="table-wrap"><table><thead><tr><th>Situation</th><th>What happens</th><th>Why it is safe</th></tr></thead><tbody><tr><td>Same event delivered twice</td><td>Second copy finds its hit already in <code>alert_hit</code></td><td>Counters move only when a hit is attached</td></tr><tr><td>Two threads, same new alert</td><td>Second INSERT waits on the unique index, then sees the row</td><td>Exactly one alert; proven by the 50-thread test</td></tr><tr><td>Deadlock on a brand-new key (rare)</td><td>Transaction rolls back, JMS session too</td><td>Broker redelivers; every step is idempotent</td></tr><tr><td>MySQL down</td><td>Exception, rollback, redelivery with backoff</td><td>After 5 attempts the message waits in <code>DLQ.sentinel.detection.hits</code></td></tr><tr><td>Analyst edits a stale screen</td><td>409 (expectedVersion mismatch or @Version)</td><td>Reload and retry; nothing is overwritten</td></tr></tbody></table></div>
+</main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/flows.js?v=3"></script>
+</body>
+</html>

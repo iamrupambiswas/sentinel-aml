@@ -1,8 +1,8 @@
 {
   "info": {
     "_postman_id": "ef6642c6-b769-433c-8296-aa4822d4d3cd",
-    "name": "Sentinel AML - Phases 1-4",
-    "description": "Manual test collection for Sentinel AML. Import, select the 'Sentinel AML - Local' environment (or use the collection variables), and run folders 00 -> 04 in order. See docs/manual-testing-guide.md.",
+    "name": "Sentinel AML - Phases 1-5",
+    "description": "Manual test collection for Sentinel AML. Import, select the 'Sentinel AML - Local' environment (or use the collection variables), and run folders 00 -> 08 in order. Folder 08 waits ~40 s in total for broker redelivery. See docs/manual-testing-guide.md.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -48,6 +48,38 @@
     },
     {
       "key": "batchErrId",
+      "value": ""
+    },
+    {
+      "key": "p5CustomerId",
+      "value": ""
+    },
+    {
+      "key": "alertId",
+      "value": ""
+    },
+    {
+      "key": "alertVersion",
+      "value": ""
+    },
+    {
+      "key": "alertVersionNext",
+      "value": ""
+    },
+    {
+      "key": "ruleVersion",
+      "value": ""
+    },
+    {
+      "key": "ruleVersionNew",
+      "value": ""
+    },
+    {
+      "key": "ctrOriginal",
+      "value": ""
+    },
+    {
+      "key": "dlqMessageId",
       "value": ""
     }
   ],
@@ -183,7 +215,37 @@
           ]
         },
         {
-          "name": "Active rules (via gateway)",
+          "name": "Alert-case health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8085/actuator/health",
+              "host": [
+                "http://localhost:8085"
+              ],
+              "path": [
+                "actuator",
+                "health"
+              ]
+            },
+            "description": "Phase 5: alert-case-service (port 8085) consumes sentinel.detection.hits."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"UP\", () => pm.expect(pm.response.json().status).to.eql(\"UP\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "All rules with live version (via gateway)",
           "request": {
             "method": "GET",
             "header": [],
@@ -198,7 +260,7 @@
                 "rules"
               ]
             },
-            "description": "Proves the gateway route `/api/v1/rules/** -> detection-service`. Also look for `Loaded 6 active AML rules` in the detection log."
+            "description": "Phase 5 shape: a list of every rule (active and inactive) with `version` (DB) and `loadedVersion` (what this detection pod evaluates with)."
           },
           "event": [
             {
@@ -207,7 +269,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"6 active rules\", () => pm.expect(Object.keys(pm.response.json().data)).to.have.lengthOf(6));"
+                  "const rules = pm.response.json().data;",
+                  "pm.test(\"7 rules, 6 active\", () => { pm.expect(rules).to.have.lengthOf(7); pm.expect(rules.filter(r => r.active)).to.have.lengthOf(6); });",
+                  "pm.test(\"every active rule is loaded at its DB version\", () => rules.filter(r => r.active).forEach(r => pm.expect(r.loadedVersion).to.eql(r.version)));"
                 ]
               }
             }
@@ -895,6 +959,16 @@
           },
           "event": [
             {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The upload returns 202 at once; the Spring Batch job finishes ~1-2 s later",
+                  "setTimeout(() => {}, 3000);"
+                ]
+              }
+            },
+            {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
@@ -972,6 +1046,16 @@
             "description": "If status is still PROCESSING, send again after a second.\n\n```sql\nSELECT status, total_records, failed_records, completed_at FROM ingestion_db.ingestion_batch WHERE id = '<batchId>';\nSELECT line_number, error_reason FROM ingestion_db.ingestion_error WHERE batch_id = '<batchId>' ORDER BY line_number;\nSELECT COUNT(*) FROM ingestion_db.transaction WHERE batch_id = '<batchId>';\n```"
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The upload returns 202 at once; the Spring Batch job finishes ~1-2 s later",
+                  "setTimeout(() => {}, 3000);"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
@@ -2641,6 +2725,1728 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 Phase 5 - Customer risk to Redis",
+      "description": "customer-service now owns `aml:acct-risk:{accountId}` in Redis (effective rating = higher of customer and account). detection-service multiplies the score by 1.0 / 1.15 / 1.3. Check Redis with `redis-cli GET aml:acct-risk:ACC-P5-<run>`.",
+      "item": [
+        {
+          "name": "1. Create customer (MEDIUM by default)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"CORPORATE\",\n  \"fullName\": \"Phase Five Traders Pvt Ltd\",\n  \"idNumber\": \"CIN-P5{{run}}\",\n  \"dob\": \"1990-01-01\",\n  \"nationality\": \"IND\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"p5CustomerId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Open account ACC-P5-{{run}} as HIGH",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{p5CustomerId}}/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{p5CustomerId}}",
+                "accounts"
+              ]
+            },
+            "description": "Give an explicit id so it matches the account used in transactions. Redis now holds HIGH (written after commit).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountId\": \"ACC-P5-{{run}}\",\n  \"type\": \"CURRENT\",\n  \"currency\": \"INR\",\n  \"riskRating\": \"HIGH\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"effective rating is HIGH\", () => pm.expect(pm.response.json().data.effectiveRiskRating).to.eql(\"HIGH\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Same account id again (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{p5CustomerId}}/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{p5CustomerId}}",
+                "accounts"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountId\": \"ACC-P5-{{run}}\",\n  \"type\": \"CURRENT\",\n  \"currency\": \"INR\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Get account",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/ACC-P5-{{run}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "accounts",
+                "ACC-P5-{{run}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const a = pm.response.json().data;",
+                  "pm.test(\"account HIGH, customer MEDIUM, effective HIGH\", () => { pm.expect(a.accountRiskRating).to.eql(\"HIGH\"); pm.expect(a.customerRiskRating).to.eql(\"MEDIUM\"); pm.expect(a.effectiveRiskRating).to.eql(\"HIGH\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. Lower account to LOW (effective stays MEDIUM)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/ACC-P5-{{run}}/risk-rating",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "accounts",
+                "ACC-P5-{{run}}",
+                "risk-rating"
+              ]
+            },
+            "description": "Effective rating is the higher of the two, so the customer's MEDIUM wins.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"riskRating\": \"LOW\",\n  \"reason\": \"KYC refresh completed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"effective = customer MEDIUM\", () => pm.expect(pm.response.json().data.effectiveRiskRating).to.eql(\"MEDIUM\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. Raise customer to HIGH (all accounts HIGH)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{p5CustomerId}}/risk-rating",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{p5CustomerId}}",
+                "risk-rating"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"riskRating\": \"HIGH\",\n  \"reason\": \"Adverse media hit\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"every account effective HIGH\", () => pm.response.json().data.accounts.forEach(a => pm.expect(a.effectiveRiskRating).to.eql(\"HIGH\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. Get customer with accounts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customers/{{p5CustomerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "{{p5CustomerId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"1 account\", () => pm.expect(pm.response.json().data.accounts).to.have.lengthOf(1));",
+                  "pm.test(\"id number masked\", () => pm.expect(pm.response.json().data.customer.idNumberMasked).to.match(/^\\*+/));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "8. Full resync to Redis",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/risk-sync",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "risk-sync"
+              ]
+            },
+            "description": "Repairs Redis if a write was missed (it also runs at startup and after seeding)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"synced at least 1 account\", () => pm.expect(pm.response.json().data).to.be.at.least(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "9. Unknown account (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/ACC-NOPE-{{run}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "accounts",
+                "ACC-NOPE-{{run}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 Phase 5 - Alerts and de-duplication",
+      "description": "alert-case-service folds every hit for the same accountId:ruleCode:windowBucket into ONE alert (P14). Run in order; request 5 waits 4 s for ingestion -> outbox -> detection -> alerts.",
+      "item": [
+        {
+          "name": "1/4 Structuring deposit USD 9100",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "Four deposits just under the CTR threshold. Deposits 3 and 4 both fire STRUCTURING -> 2 hits, ONE alert.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-P5-1\",\n  \"destinationAccountId\": \"ACC-P5S-{{run}}\",\n  \"amount\": 9100,\n  \"currency\": \"USD\",\n  \"type\": \"CASH_DEPOSIT\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (4 * 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2/4 Structuring deposit USD 9400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "Four deposits just under the CTR threshold. Deposits 3 and 4 both fire STRUCTURING -> 2 hits, ONE alert.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-P5-2\",\n  \"destinationAccountId\": \"ACC-P5S-{{run}}\",\n  \"amount\": 9400,\n  \"currency\": \"USD\",\n  \"type\": \"CASH_DEPOSIT\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (3 * 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3/4 Structuring deposit USD 9700",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "Four deposits just under the CTR threshold. Deposits 3 and 4 both fire STRUCTURING -> 2 hits, ONE alert.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-P5-3\",\n  \"destinationAccountId\": \"ACC-P5S-{{run}}\",\n  \"amount\": 9700,\n  \"currency\": \"USD\",\n  \"type\": \"CASH_DEPOSIT\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (2 * 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4/4 Structuring deposit USD 9900",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions"
+              ]
+            },
+            "description": "Four deposits just under the CTR threshold. Deposits 3 and 4 both fire STRUCTURING -> 2 hits, ONE alert.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-P5-4\",\n  \"destinationAccountId\": \"ACC-P5S-{{run}}\",\n  \"amount\": 9900,\n  \"currency\": \"USD\",\n  \"type\": \"CASH_DEPOSIT\",\n  \"txnTimestamp\": \"{{ts}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"ts\", new Date(Date.now() - (1 * 3600 * 1000)).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. Alerts for the account (1 alert, 2 hits)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/alerts?accountId=ACC-P5S-{{run}}&ruleCode=STRUCTURING",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "alerts"
+              ],
+              "query": [
+                {
+                  "key": "accountId",
+                  "value": "ACC-P5S-{{run}}"
+                },
+                {
+                  "key": "ruleCode",
+                  "value": "STRUCTURING"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// give the pipeline time: outbox poll 200 ms + detection + alert consumer\nsetTimeout(() => {}, 4000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const list = pm.response.json().data.content;",
+                  "pm.test(\"exactly one STRUCTURING alert\", () => pm.expect(list).to.have.lengthOf(1));",
+                  "pm.test(\"two hits folded into it\", () => pm.expect(list[0].hitCount).to.eql(2));",
+                  "pm.test(\"status NEW\", () => pm.expect(list[0].status).to.eql(\"NEW\"));",
+                  "pm.collectionVariables.set(\"alertId\", list[0].id); pm.collectionVariables.set(\"alertVersion\", list[0].version);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. Alert detail with hits",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/alerts/{{alertId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "alerts",
+                "{{alertId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"dedup key is account:rule:bucket\", () => pm.expect(d.dedupKey).to.match(/^ACC-P5S-.+:STRUCTURING:\\d+$/));",
+                  "// hits are listed by txn time; whichever deposit was evaluated LAST saw all four (not always the newest one)\npm.test(\"2 hits, one with all 4 deposits as evidence\", () => { pm.expect(d.hits).to.have.lengthOf(2); pm.expect(Math.max(...d.hits.map(h => h.evidenceTxnIds.length))).to.eql(4); });",
+                  "pm.test(\"allowed next steps\", () => pm.expect(d.allowedNextStatuses).to.include(\"UNDER_REVIEW\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. Alert statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/alerts/stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "alerts",
+                "stats"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"hits >= alerts\", () => { const s = pm.response.json().data; pm.expect(s.hits).to.be.at.least(s.alerts); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "8. NEW -> ESCALATED is not allowed (409)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/alerts/{{alertId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "alerts",
+                "{{alertId}}",
+                "status"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"ESCALATED\",\n  \"note\": \"skipping review\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "9. Analyst A: NEW -> UNDER_REVIEW",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/alerts/{{alertId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "alerts",
+                "{{alertId}}",
+                "status"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"UNDER_REVIEW\",\n  \"note\": \"Picked up by analyst A\",\n  \"expectedVersion\": {{alertVersion}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"alertVersionNext\", pm.response.json().data.version);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "10. Analyst B with a stale version (409)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/alerts/{{alertId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "alerts",
+                "{{alertId}}",
+                "status"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CLOSED_FALSE_POSITIVE\",\n  \"note\": \"B had an old screen\",\n  \"expectedVersion\": {{alertVersion}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"tells B to reload\", () => pm.expect(pm.response.json().message).to.include(\"Reload\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "11. UNDER_REVIEW -> ESCALATED",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/alerts/{{alertId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "alerts",
+                "{{alertId}}",
+                "status"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"ESCALATED\",\n  \"note\": \"4 deposits just under CTR from 4 senders\",\n  \"expectedVersion\": {{alertVersionNext}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "12. ESCALATED -> CLOSED_CONFIRMED",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/alerts/{{alertId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "alerts",
+                "{{alertId}}",
+                "status"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CLOSED_CONFIRMED\",\n  \"note\": \"SAR to be drafted\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "13. Closed is terminal (409)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/alerts/{{alertId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "alerts",
+                "{{alertId}}",
+                "status"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"UNDER_REVIEW\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "14. Open alerts, highest risk first",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/alerts?status=NEW&size=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "alerts"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "NEW"
+                },
+                {
+                  "key": "size",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const s = pm.response.json().data.content.map(a => a.riskScore);",
+                  "pm.test(\"sorted by risk desc\", () => pm.expect(s).to.eql([...s].sort((a, b) => b - a)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15. Unknown alert (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/alerts/does-not-exist",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "alerts",
+                "does-not-exist"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 Phase 5 - Live rule tuning",
+      "description": "PUT /api/v1/rules/{code}: optimistic lock (expectedVersion), audit row in aml_rule_version, broadcast on the sentinel.rules.changed TOPIC after commit -> every detection pod reloads (watch the detection log: 'Hot-reloaded ... commit-to-live N ms').",
+      "item": [
+        {
+          "name": "1. Read CTR_THRESHOLD",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/rules/CTR_THRESHOLD",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rules",
+                "CTR_THRESHOLD"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json().data;",
+                  "pm.collectionVariables.set(\"ruleVersion\", r.version);",
+                  "pm.collectionVariables.set(\"ctrOriginal\", r.thresholdAmount);",
+                  "pm.test(\"loaded = DB version\", () => pm.expect(r.loadedVersion).to.eql(r.version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Raise CTR threshold to 10 lakh",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/rules/CTR_THRESHOLD",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rules",
+                "CTR_THRESHOLD"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"thresholdAmount\": 1000000,\n  \"expectedVersion\": {{ruleVersion}},\n  \"changedBy\": \"compliance.lead\",\n  \"reason\": \"Postman demo: raise CTR to INR 10 lakh\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json().data;",
+                  "pm.test(\"version bumped\", () => pm.expect(r.version).to.eql(pm.collectionVariables.get(\"ruleVersion\") + 1));",
+                  "pm.collectionVariables.set(\"ruleVersionNew\", r.version);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Live on this pod (after 1 s)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/rules/CTR_THRESHOLD",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rules",
+                "CTR_THRESHOLD"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// topic broadcast + reload usually takes < 100 ms\nsetTimeout(() => {}, 1000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json().data;",
+                  "pm.test(\"loadedVersion caught up\", () => pm.expect(r.loadedVersion).to.eql(r.version));",
+                  "pm.test(\"new threshold\", () => pm.expect(r.thresholdAmount).to.eql(1000000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Stale edit with the old version (409)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/rules/CTR_THRESHOLD",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rules",
+                "CTR_THRESHOLD"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"weight\": 35,\n  \"expectedVersion\": {{ruleVersion}},\n  \"changedBy\": \"analyst.b\",\n  \"reason\": \"edited an old screen\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. Typo in a param name (400)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/rules/STRUCTURING",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rules",
+                "STRUCTURING"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"params\": {\n    \"minAmountINR\": 700000,\n    \"maxAmountInr\": 834999\n  },\n  \"expectedVersion\": 1,\n  \"changedBy\": \"x\",\n  \"reason\": \"typo\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"names the supported params\", () => pm.expect(pm.response.json().message).to.include(\"minAmountInr\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. Missing reason (400)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/rules/CTR_THRESHOLD",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rules",
+                "CTR_THRESHOLD"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"weight\": 35,\n  \"expectedVersion\": {{ruleVersionNew}},\n  \"changedBy\": \"x\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. Version history (audit)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/rules/CTR_THRESHOLD/versions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rules",
+                "CTR_THRESHOLD",
+                "versions"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const v = pm.response.json().data;",
+                  "pm.test(\"newest first, with who and why\", () => { pm.expect(v[0].version).to.eql(pm.collectionVariables.get(\"ruleVersionNew\")); pm.expect(v[0].changedBy).to.eql(\"compliance.lead\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "8. Revert CTR to the original threshold",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/rules/CTR_THRESHOLD",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rules",
+                "CTR_THRESHOLD"
+              ]
+            },
+            "description": "Puts the demo back so Phase 4 scenarios still fire CTR at 8.3 lakh.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"thresholdAmount\": {{ctrOriginal}},\n  \"expectedVersion\": {{ruleVersionNew}},\n  \"changedBy\": \"compliance.lead\",\n  \"reason\": \"Postman demo: revert\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "9. Unknown rule (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/rules/NOT_A_RULE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rules",
+                "NOT_A_RULE"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "08 Phase 5 - Dead letters (DLQ)",
+      "description": "Broker policy (infra/artemis/broker.properties): 5 attempts, 1 s x2 backoff (max 30 s), then DLQ.<queue>. Requests 3 and 5 wait ~20 s for the 1+2+4+8 s retries. Poison test is local-only (sentinel.ops.poison-test-enabled).",
+      "item": [
+        {
+          "name": "1. DLQ overview",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ops/dlq",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ops",
+                "dlq"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"both queues listed\", () => pm.expect(pm.response.json().data.map(q => q.sourceQueue)).to.have.members([\"sentinel.detection.hits\", \"sentinel.txn.ingested\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Send a poison message",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ops/dlq/sentinel.txn.ingested/poison-test",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ops",
+                "dlq",
+                "sentinel.txn.ingested",
+                "poison-test"
+              ]
+            },
+            "description": "Unreadable JSON: detection-service fails it 5 times (watch the log), then the broker parks it."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Browse DLQ (after ~20 s)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ops/dlq/sentinel.txn.ingested",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ops",
+                "dlq",
+                "sentinel.txn.ingested"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// 1 + 2 + 4 + 8 s of redelivery backoff, plus margin\nsetTimeout(() => {}, 20000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const msgs = pm.response.json().data;",
+                  "pm.test(\"poison message is dead-lettered\", () => pm.expect(msgs.length).to.be.at.least(1));",
+                  "const poison = msgs.find(m => m.body.includes(\"not a valid\"));",
+                  "pm.test(\"original queue recorded\", () => pm.expect(poison.originalQueue).to.eql(\"sentinel.txn.ingested\"));",
+                  "pm.collectionVariables.set(\"dlqMessageId\", poison.messageId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Replay it to the source queue",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ops/dlq/sentinel.txn.ingested/replay?messageId={{dlqMessageId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ops",
+                "dlq",
+                "sentinel.txn.ingested",
+                "replay"
+              ],
+              "query": [
+                {
+                  "key": "messageId",
+                  "value": "{{dlqMessageId}}"
+                }
+              ]
+            },
+            "description": "In real life you replay AFTER fixing the bug. This one is still broken, so it will dead-letter again."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"1 replayed\", () => pm.expect(pm.response.json().data.replayed).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. Still broken: back in the DLQ (after ~20 s)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ops/dlq/sentinel.txn.ingested",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ops",
+                "dlq",
+                "sentinel.txn.ingested"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// another 5 attempts\nsetTimeout(() => {}, 20000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const poison = pm.response.json().data.find(m => m.body.includes(\"not a valid\"));",
+                  "pm.test(\"dead-lettered again\", () => pm.expect(poison).to.be.an(\"object\"));",
+                  "pm.collectionVariables.set(\"dlqMessageId\", poison.messageId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. Delete it permanently",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ops/dlq/sentinel.txn.ingested/messages/{{dlqMessageId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ops",
+                "dlq",
+                "sentinel.txn.ingested",
+                "messages",
+                "{{dlqMessageId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. Unknown queue (400)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ops/dlq/some.other.queue",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ops",
+                "dlq",
+                "some.other.queue"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 400\", () => pm.response.to.have.status(400));"
                 ]
               }
             }

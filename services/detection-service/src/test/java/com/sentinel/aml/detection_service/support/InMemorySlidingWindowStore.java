@@ -20,9 +20,11 @@ public class InMemorySlidingWindowStore implements SlidingWindowStore {
     public List<WindowEntry> addAndGet(String key, WindowEntry entry, Duration window) {
         TreeMap<String, Long> z = zsets.computeIfAbsent(key, k -> new TreeMap<>());
         z.put(entry.encode(), entry.timestampMillis());
-        long from = entry.timestampMillis() - window.toMillis();
-        z.values().removeIf(score -> score < from);
-        return read(key, from, entry.timestampMillis());
+        long w = window.toMillis();
+        long newest = Collections.max(z.values());
+        long cutoff = Math.min(newest - SlidingWindowStore.retention(window).toMillis(), entry.timestampMillis() - w);
+        z.values().removeIf(score -> score < cutoff);
+        return read(key, entry.timestampMillis() - w, entry.timestampMillis() + w);
     }
 
     @Override

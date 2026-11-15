@@ -17,6 +17,7 @@ sentinel-aml/
 │   └── alert-case-service/ # Alert de-duplication, case management, and immutable hash-chained audit log
 ├── frontend/               # Next.js 14+ analyst console with Tailwind, shadcn/ui, and React Flow
 ├── infra/                  # Infrastructure as Code (Terraform)
+│   ├── artemis/            # broker.properties: redelivery backoff + per-queue DLQs (mounted by docker-compose, Phase 5)
 │   ├── modules/            # Reusable AWS modules (VPC, EKS, RDS, ElastiCache, Amazon MQ, Secrets Manager)
 │   └── envs/               
 │       └── dev/            # Environment-specific state and variables for development
