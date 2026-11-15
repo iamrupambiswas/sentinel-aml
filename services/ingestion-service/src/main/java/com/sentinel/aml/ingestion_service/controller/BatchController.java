@@ -41,8 +41,8 @@ public class BatchController {
     /** Status + rejected-row report (P4). */
     @GetMapping("/{batchId}")
     public ResponseEntity<ApiResponse<BatchStatusResponse>> getBatch(
-            @PathVariable String batchId,
-            @RequestParam(defaultValue = "100") int maxErrors) {
+            @PathVariable("batchId") String batchId,
+            @RequestParam(name = "maxErrors", defaultValue = "100") int maxErrors) {
         return batchService.getBatchStatus(batchId, Math.min(Math.max(maxErrors, 0), 1000))
                 .map(s -> ResponseEntity.ok(ApiResponse.<BatchStatusResponse>builder().success(true).data(s).build()))
                 .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.<BatchStatusResponse>builder()
