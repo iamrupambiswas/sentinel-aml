@@ -24,7 +24,7 @@ import java.util.List;
 
 /**
  * Dead-letter operations (P21). Lives in detection-service because it already talks to the broker;
- * it works for every sentinel queue. Phase 6: OPS role only.
+ * it works for every sentinel queue. ADMIN only (config/SecurityRoutes).
  */
 @RestController
 @RequestMapping(ApiRoutes.OPS_DLQ)

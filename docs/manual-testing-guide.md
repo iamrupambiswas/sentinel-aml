@@ -1,4 +1,4 @@
-# Manual run & test guide (Phases 1–5)
+# Manual run & test guide (Phases 1–6)
 
 Everything here is done by hand: Docker Compose, one terminal per service, Postman for the API, and Adminer, `mysql`, `redis-cli`, the Artemis console and the service logs to see what happened inside.
 
@@ -39,7 +39,7 @@ Wait until **mysql**, **redis** and **activemq** show `(healthy)` (≈ 20–40 s
 | sentinel-mysql | Adminer → http://localhost:8081 | System **MySQL**, Server **mysql**, user **root**, password **root** |
 | sentinel-redis | RedisInsight → http://localhost:5540 (container `sentinel-redisinsight`) | none; first time *Add Redis database* → host **redis**, port **6379** |
 | sentinel-activemq | Artemis console → http://localhost:8161/console | admin / adminpassword |
-| sentinel-keycloak | Admin console → http://localhost:8180/admin | admin / admin (not used until Phase 6) |
+| sentinel-keycloak | Admin console → http://localhost:8180/admin | admin / admin (master realm). The `sentinel` realm and its test users are imported from `infra/keycloak/sentinel-realm.json` |
 
 All web UIs, Swagger pages and API routes are listed in one place in the README, under **Local web UIs & routes**.
 
@@ -116,7 +116,7 @@ In Adminer you should now see four databases: `customer_db`, `ingestion_db`, `se
    - `Sentinel-AML.postman_collection.json`
    - `Sentinel-AML-local.postman_environment.json`
 2. Top-right environment dropdown → **Sentinel AML – Local** (`baseUrl = http://localhost:8080`, the gateway).
-3. Run the folders **in order**: `00 → 01 → … → 08` (05–08 are Phase 5). Every request has:
+3. Run the folders **in order**: `00 → 01 → … → 09` (05–08 are Phase 5, 09 is Phase 6). Since Phase 6 every API call needs a Keycloak JWT: the collection logs in as `admin1` by itself before the first request and refreshes the token before it expires, so Keycloak must be up. Every request has:
    - a **Tests** tab with assertions (green/red in the response panel),
    - a **Docs/description** with the exact SQL / redis-cli / log line to verify it.
 4. You can also run a whole folder with **Run folder** (Collection Runner). For folder 03, re-attach the CSV files first (see §6.3). Folder 08 waits about 40 s in total (broker redelivery backoff). The whole collection also runs from the CLI, from the repository root (the CSV paths are relative to it):
@@ -137,6 +137,7 @@ Variables the collection manages for you:
 | `alertId`, `alertVersion`, `alertVersionNext` | Folder 06 | Alert detail and status workflow (optimistic lock) |
 | `ruleVersion`, `ruleVersionNew`, `ctrOriginal` | Folder 07 | `expectedVersion` for rule edits; revert value |
 | `dlqMessageId` | Folder 08 | Replay and delete of one dead letter |
+| `accessToken`, `analystToken`, `ingestToken` (+ `…Expiry`) | Collection / folder 09 pre-request scripts | Bearer tokens for `admin1`, `analyst1` and the `sentinel-ingest` client |
 
 Look up the current values under **Collection → Variables** (needed to fill the SQL below).
 
@@ -356,7 +357,7 @@ Requests 8–13 walk the workflow: NEW → ESCALATED is refused (409); a second 
 
 **07 Live rule tuning.** Raises CTR to ₹10 lakh, checks it is live, then reverts. Watch the detection terminal:
 ```
-Hot-reloaded rules after change to CTR_THRESHOLD v2 by compliance.lead (now loaded: v2, commit-to-live 45 ms)
+Hot-reloaded rules after change to CTR_THRESHOLD v2 by admin1 (now loaded: v2, commit-to-live 45 ms)
 ```
 ```sql
 SELECT version, threshold_amount, changed_by, change_reason, changed_at
@@ -375,6 +376,30 @@ Expected output line: `X2: 600 deliveries on 50 threads -> 24 alerts, 463 hits, 
 
 **Out-of-order evaluation (ADR-005 §11, fixed):** several detection threads can evaluate one account's transactions out of time order, especially when they are published in the same 200 ms outbox poll. Window rules now check every window that contains the new entry: they look at entries up to one window *after* it as well, and trimming is relative to the newest entry. So the result no longer depends on order, and folder 06 doesn't need to space its deposits. To see it, post a rapid-movement debit **before** its credit: the RAPID_MOVEMENT hit fires when the credit arrives.
 
+### 6.6 Folder 09: security (Phase 6)
+
+Keycloak issues the tokens; the gateway rejects requests without a valid one (401) and each service checks the role (403). Roles: `ANALYST` < `SENIOR_ANALYST` < `ADMIN`, plus `INGEST` for the `sentinel-ingest` machine client (ADMIN includes it). Test users and the dev client secret are in `infra/keycloak/sentinel-realm.json`.
+
+| # | Request | Expect |
+|---|---|---|
+| 1–2 | No token / garbage token at the gateway | 401 |
+| 3 | No token straight to alert-case-service on 8085 | 401 (services check the token too) |
+| 4 | `analyst1` reads alerts | 200 |
+| 5–7 | `analyst1` edits a rule, opens the DLQ, triggers seeding | 403 |
+| 8 | `sentinel-ingest` client reads alerts | 403 (it may only ingest) |
+| 9 | `admin1` reads rules | 200 |
+
+Rule changes are now recorded under the token's username, not a `changedBy` field in the body (folder 07 checks `changedBy == admin1`).
+
+With curl, get a token first (needs `jq`):
+```bash
+TOKEN=$(curl -s -d grant_type=password -d client_id=sentinel-postman -d username=analyst1 -d password=analyst1 localhost:8180/realms/sentinel/protocol/openid-connect/token | jq -r .access_token)
+```
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" "localhost:8080/api/v1/alerts?size=5"
+```
+Health and Swagger UI stay open; Swagger's "Try it out" needs a token pasted into the request headers.
+
 ---
 
 ## 7. Troubleshooting
@@ -382,6 +407,7 @@ Expected output line: `X2: 600 deliveries on 50 threads -> 24 alerts, 463 hits, 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Port 8080 was already in use` | Keycloak from an old compose config, or a previous service still running | `docker compose up -d` (recreates Keycloak on 8180); `lsof -nP -iTCP:8080 -sTCP:LISTEN` then stop that PID |
+| Every API call returns 401, or Postman logs `Keycloak token request failed` | Keycloak not up yet, or the container predates Phase 6 and has no `sentinel` realm | `docker compose up -d keycloak` (recreates it with the realm import; first start takes ~30 s), then check http://localhost:8180/realms/sentinel |
 | `Public Key Retrieval is not allowed` | MySQL 8 auth | already handled by `allowPublicKeyRetrieval=true` in the JDBC URL. Check you're running the latest build |
 | `Schema-validation: missing table` | Flyway didn't run | rebuild (`mvn clean install -DskipTests`); detection needs the flyway dependency (present since commit 5f27921) |
 | `Connection refused: localhost:61616` | Artemis still starting | wait for `(healthy)` in `docker compose ps` |

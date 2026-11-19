@@ -92,7 +92,7 @@ public class RuleAdminService {
     }
 
     @Transactional
-    public RuleView update(String code, RuleUpdateRequest req) {
+    public RuleView update(String code, RuleUpdateRequest req, String changedBy) {
         AmlRule rule = find(code);
         if (rule.getVersion() != req.expectedVersion()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, String.format(
@@ -139,10 +139,10 @@ public class RuleAdminService {
         }
 
         Instant now = clock.instant();
-        versionRepository.save(AmlRuleVersion.snapshotOf(rule, req.changedBy(), req.reason(),
+        versionRepository.save(AmlRuleVersion.snapshotOf(rule, changedBy, req.reason(),
                 LocalDateTime.ofInstant(now, ZoneOffset.UTC)));
-        events.publishEvent(new RuleChangedApplicationEvent(code, rule.getVersion(), req.changedBy(), now));
-        log.info("Rule {} updated to version {} by {}: {}", code, rule.getVersion(), req.changedBy(), req.reason());
+        events.publishEvent(new RuleChangedApplicationEvent(code, rule.getVersion(), changedBy, now));
+        log.info("Rule {} updated to version {} by {}: {}", code, rule.getVersion(), changedBy, req.reason());
         // loadedVersion still shows the OLD version here: the reload happens after commit
         return toView(rule, ruleCache.getActiveRules());
     }

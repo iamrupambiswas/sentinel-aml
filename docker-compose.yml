@@ -61,7 +61,10 @@ services:
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
-    command: start-dev
+    # Imports the sentinel realm (roles, clients, test users) on first start; skipped if it already exists
+    command: start-dev --import-realm
+    volumes:
+      - ./infra/keycloak:/opt/keycloak/data/import:ro
     ports:
       - "8180:8080"   # host 8180 -> Keycloak; host 8080 is reserved for the API gateway
     networks:

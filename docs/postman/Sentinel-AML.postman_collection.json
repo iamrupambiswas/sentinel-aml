@@ -12,7 +12,21 @@
         "type": "text/javascript",
         "exec": [
           "// One random suffix per run so detection scenarios always start with empty windows",
-          "if (!pm.collectionVariables.get(\"run\")) { pm.collectionVariables.set(\"run\", Math.random().toString(36).slice(2, 8).toUpperCase()); }"
+          "if (!pm.collectionVariables.get(\"run\")) { pm.collectionVariables.set(\"run\", Math.random().toString(36).slice(2, 8).toUpperCase()); }",
+          "",
+          "// Phase 6: fetch a Keycloak token once and reuse it until ~30 s before it expires",
+          "if (!pm.collectionVariables.get(\"accessToken\") || Date.now() > Number(pm.collectionVariables.get(\"accessTokenExpiry\") || 0)) {",
+          "  pm.sendRequest({",
+          "    url: pm.collectionVariables.get(\"keycloakUrl\") + \"/protocol/openid-connect/token\",",
+          "    method: \"POST\",",
+          "    body: { mode: \"urlencoded\", urlencoded: [{key: \"grant_type\", value: \"password\"}, {key: \"client_id\", value: \"sentinel-postman\"}, {key: \"username\", value: \"admin1\"}, {key: \"password\", value: \"admin1\"}] }",
+          "  }, (err, res) => {",
+          "    if (err || res.code !== 200) { console.error(\"Keycloak token request failed\", err || res.text()); return; }",
+          "    const t = res.json();",
+          "    pm.collectionVariables.set(\"accessToken\", t.access_token);",
+          "    pm.collectionVariables.set(\"accessTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000));",
+          "  });",
+          "}"
         ]
       }
     }
@@ -80,6 +94,34 @@
     },
     {
       "key": "dlqMessageId",
+      "value": ""
+    },
+    {
+      "key": "keycloakUrl",
+      "value": "http://localhost:8180/realms/sentinel"
+    },
+    {
+      "key": "accessToken",
+      "value": ""
+    },
+    {
+      "key": "accessTokenExpiry",
+      "value": ""
+    },
+    {
+      "key": "analystToken",
+      "value": ""
+    },
+    {
+      "key": "analystTokenExpiry",
+      "value": ""
+    },
+    {
+      "key": "ingestToken",
+      "value": ""
+    },
+    {
+      "key": "ingestTokenExpiry",
       "value": ""
     }
   ],
@@ -3873,7 +3915,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"thresholdAmount\": 1000000,\n  \"expectedVersion\": {{ruleVersion}},\n  \"changedBy\": \"compliance.lead\",\n  \"reason\": \"Postman demo: raise CTR to INR 10 lakh\"\n}",
+              "raw": "{\n  \"thresholdAmount\": 1000000,\n  \"expectedVersion\": {{ruleVersion}},\n  \"reason\": \"Postman demo: raise CTR to INR 10 lakh\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3964,7 +4006,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"weight\": 35,\n  \"expectedVersion\": {{ruleVersion}},\n  \"changedBy\": \"analyst.b\",\n  \"reason\": \"edited an old screen\"\n}",
+              "raw": "{\n  \"weight\": 35,\n  \"expectedVersion\": {{ruleVersion}},\n  \"reason\": \"edited an old screen\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4009,7 +4051,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"params\": {\n    \"minAmountINR\": 700000,\n    \"maxAmountInr\": 834999\n  },\n  \"expectedVersion\": 1,\n  \"changedBy\": \"x\",\n  \"reason\": \"typo\"\n}",
+              "raw": "{\n  \"params\": {\n    \"minAmountINR\": 700000,\n    \"maxAmountInr\": 834999\n  },\n  \"expectedVersion\": 1,\n  \"reason\": \"typo\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4055,7 +4097,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"weight\": 35,\n  \"expectedVersion\": {{ruleVersionNew}},\n  \"changedBy\": \"x\"\n}",
+              "raw": "{\n  \"weight\": 35,\n  \"expectedVersion\": {{ruleVersionNew}}\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4103,7 +4145,7 @@
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
                   "const v = pm.response.json().data;",
-                  "pm.test(\"newest first, with who and why\", () => { pm.expect(v[0].version).to.eql(pm.collectionVariables.get(\"ruleVersionNew\")); pm.expect(v[0].changedBy).to.eql(\"compliance.lead\"); });"
+                  "pm.test(\"newest first, with who and why\", () => { pm.expect(v[0].version).to.eql(pm.collectionVariables.get(\"ruleVersionNew\")); pm.expect(v[0].changedBy).to.eql(\"admin1\"); });"
                 ]
               }
             }
@@ -4134,7 +4176,7 @@
             "description": "Puts the demo back so Phase 4 scenarios still fire CTR at 8.3 lakh.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"thresholdAmount\": {{ctrOriginal}},\n  \"expectedVersion\": {{ruleVersionNew}},\n  \"changedBy\": \"compliance.lead\",\n  \"reason\": \"Postman demo: revert\"\n}",
+              "raw": "{\n  \"thresholdAmount\": {{ctrOriginal}},\n  \"expectedVersion\": {{ruleVersionNew}},\n  \"reason\": \"Postman demo: revert\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4453,6 +4495,372 @@
           ]
         }
       ]
+    },
+    {
+      "name": "09 Phase 6 - Security (Keycloak JWT + roles)",
+      "item": [
+        {
+          "name": "1. No token at the gateway -> 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/alerts",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Garbage token -> 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/alerts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "not-a-jwt",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. No token straight to the service port -> 401 (defense in depth)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "http://localhost:8085/api/v1/alerts",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. ANALYST reads alerts -> 200",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/alerts?size=1",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{analystToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Phase 6: fetch a Keycloak token once and reuse it until ~30 s before it expires",
+                  "if (!pm.collectionVariables.get(\"analystToken\") || Date.now() > Number(pm.collectionVariables.get(\"analystTokenExpiry\") || 0)) {",
+                  "  pm.sendRequest({",
+                  "    url: pm.collectionVariables.get(\"keycloakUrl\") + \"/protocol/openid-connect/token\",",
+                  "    method: \"POST\",",
+                  "    body: { mode: \"urlencoded\", urlencoded: [{key: \"grant_type\", value: \"password\"}, {key: \"client_id\", value: \"sentinel-postman\"}, {key: \"username\", value: \"analyst1\"}, {key: \"password\", value: \"analyst1\"}] }",
+                  "  }, (err, res) => {",
+                  "    if (err || res.code !== 200) { console.error(\"Keycloak token request failed\", err || res.text()); return; }",
+                  "    const t = res.json();",
+                  "    pm.collectionVariables.set(\"analystToken\", t.access_token);",
+                  "    pm.collectionVariables.set(\"analystTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000));",
+                  "  });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. ANALYST changes a rule -> 403",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/rules/CTR_THRESHOLD",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{analystToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"weight\": 35,\n  \"expectedVersion\": 1,\n  \"reason\": \"should be rejected before it reaches the service\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Phase 6: fetch a Keycloak token once and reuse it until ~30 s before it expires",
+                  "if (!pm.collectionVariables.get(\"analystToken\") || Date.now() > Number(pm.collectionVariables.get(\"analystTokenExpiry\") || 0)) {",
+                  "  pm.sendRequest({",
+                  "    url: pm.collectionVariables.get(\"keycloakUrl\") + \"/protocol/openid-connect/token\",",
+                  "    method: \"POST\",",
+                  "    body: { mode: \"urlencoded\", urlencoded: [{key: \"grant_type\", value: \"password\"}, {key: \"client_id\", value: \"sentinel-postman\"}, {key: \"username\", value: \"analyst1\"}, {key: \"password\", value: \"analyst1\"}] }",
+                  "  }, (err, res) => {",
+                  "    if (err || res.code !== 200) { console.error(\"Keycloak token request failed\", err || res.text()); return; }",
+                  "    const t = res.json();",
+                  "    pm.collectionVariables.set(\"analystToken\", t.access_token);",
+                  "    pm.collectionVariables.set(\"analystTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000));",
+                  "  });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. ANALYST opens the DLQ -> 403",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/ops/dlq",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{analystToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Phase 6: fetch a Keycloak token once and reuse it until ~30 s before it expires",
+                  "if (!pm.collectionVariables.get(\"analystToken\") || Date.now() > Number(pm.collectionVariables.get(\"analystTokenExpiry\") || 0)) {",
+                  "  pm.sendRequest({",
+                  "    url: pm.collectionVariables.get(\"keycloakUrl\") + \"/protocol/openid-connect/token\",",
+                  "    method: \"POST\",",
+                  "    body: { mode: \"urlencoded\", urlencoded: [{key: \"grant_type\", value: \"password\"}, {key: \"client_id\", value: \"sentinel-postman\"}, {key: \"username\", value: \"analyst1\"}, {key: \"password\", value: \"analyst1\"}] }",
+                  "  }, (err, res) => {",
+                  "    if (err || res.code !== 200) { console.error(\"Keycloak token request failed\", err || res.text()); return; }",
+                  "    const t = res.json();",
+                  "    pm.collectionVariables.set(\"analystToken\", t.access_token);",
+                  "    pm.collectionVariables.set(\"analystTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000));",
+                  "  });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. ANALYST triggers seeding -> 403",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/admin/seed-data",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{analystToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Phase 6: fetch a Keycloak token once and reuse it until ~30 s before it expires",
+                  "if (!pm.collectionVariables.get(\"analystToken\") || Date.now() > Number(pm.collectionVariables.get(\"analystTokenExpiry\") || 0)) {",
+                  "  pm.sendRequest({",
+                  "    url: pm.collectionVariables.get(\"keycloakUrl\") + \"/protocol/openid-connect/token\",",
+                  "    method: \"POST\",",
+                  "    body: { mode: \"urlencoded\", urlencoded: [{key: \"grant_type\", value: \"password\"}, {key: \"client_id\", value: \"sentinel-postman\"}, {key: \"username\", value: \"analyst1\"}, {key: \"password\", value: \"analyst1\"}] }",
+                  "  }, (err, res) => {",
+                  "    if (err || res.code !== 200) { console.error(\"Keycloak token request failed\", err || res.text()); return; }",
+                  "    const t = res.json();",
+                  "    pm.collectionVariables.set(\"analystToken\", t.access_token);",
+                  "    pm.collectionVariables.set(\"analystTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000));",
+                  "  });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "8. Ingest client (client credentials) reads alerts -> 403",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/alerts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ingestToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Phase 6: fetch a Keycloak token once and reuse it until ~30 s before it expires",
+                  "if (!pm.collectionVariables.get(\"ingestToken\") || Date.now() > Number(pm.collectionVariables.get(\"ingestTokenExpiry\") || 0)) {",
+                  "  pm.sendRequest({",
+                  "    url: pm.collectionVariables.get(\"keycloakUrl\") + \"/protocol/openid-connect/token\",",
+                  "    method: \"POST\",",
+                  "    body: { mode: \"urlencoded\", urlencoded: [{key: \"grant_type\", value: \"client_credentials\"}, {key: \"client_id\", value: \"sentinel-ingest\"}, {key: \"client_secret\", value: \"sentinel-ingest-dev-secret\"}] }",
+                  "  }, (err, res) => {",
+                  "    if (err || res.code !== 200) { console.error(\"Keycloak token request failed\", err || res.text()); return; }",
+                  "    const t = res.json();",
+                  "    pm.collectionVariables.set(\"ingestToken\", t.access_token);",
+                  "    pm.collectionVariables.set(\"ingestTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000));",
+                  "  });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "9. ADMIN reads rules -> 200 (composite role includes ANALYST)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/rules"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
-  ]
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  }
 }

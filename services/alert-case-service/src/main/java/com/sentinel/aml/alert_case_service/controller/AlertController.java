@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Analyst API. Phase 6 puts ANALYST / SUPERVISOR roles in front of it. */
+/** Analyst API. ANALYST role and up (config/SecurityRoutes). */
 @RestController
 @RequestMapping(ApiRoutes.ALERTS)
 @RequiredArgsConstructor

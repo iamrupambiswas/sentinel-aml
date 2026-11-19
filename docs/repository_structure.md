@@ -18,6 +18,7 @@ sentinel-aml/
 ├── frontend/               # Next.js 14+ analyst console with Tailwind, shadcn/ui, and React Flow
 ├── infra/                  # Infrastructure as Code (Terraform)
 │   ├── artemis/            # broker.properties: redelivery backoff + per-queue DLQs (mounted by docker-compose, Phase 5)
+│   ├── keycloak/           # sentinel-realm.json: roles, clients, test users (imported by docker-compose, Phase 6)
 │   ├── modules/            # Reusable AWS modules (VPC, EKS, RDS, ElastiCache, Amazon MQ, Secrets Manager)
 │   └── envs/               
 │       └── dev/            # Environment-specific state and variables for development

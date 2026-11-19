@@ -22,6 +22,7 @@ public final class RuleAdminDtos {
      * given, REPLACES the whole params object (send the full object, not a diff).
      *
      * @param expectedVersion the version you read; if the rule changed since, the update is rejected (409)
+     * Who made the change is not part of the body: it is the caller's JWT username (Phase 6).
      */
     public record RuleUpdateRequest(
             @PositiveOrZero BigDecimal thresholdAmount,
@@ -30,7 +31,6 @@ public final class RuleAdminDtos {
             Boolean active,
             Map<String, Object> params,
             @NotNull Integer expectedVersion,
-            @NotBlank @Size(max = 100) String changedBy,
             @NotBlank @Size(max = 500) String reason) {}
 
     /**

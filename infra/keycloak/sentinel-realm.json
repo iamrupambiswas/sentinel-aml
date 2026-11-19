@@ -1,0 +1,82 @@
+{
+  "realm": "sentinel",
+  "enabled": true,
+  "accessTokenLifespan": 900,
+  "roles": {
+    "realm": [
+      { "name": "ANALYST", "description": "Reads customers, rules and alerts; works the alert queue" },
+      {
+        "name": "SENIOR_ANALYST",
+        "description": "ANALYST plus customer and account risk-rating changes",
+        "composite": true,
+        "composites": { "realm": ["ANALYST"] }
+      },
+      { "name": "INGEST", "description": "Machine role: submits transactions and batch files" },
+      {
+        "name": "ADMIN",
+        "description": "Everything: rule tuning, DLQ, seeding, onboarding, ingestion",
+        "composite": true,
+        "composites": { "realm": ["SENIOR_ANALYST", "INGEST"] }
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "sentinel-postman",
+      "name": "Postman / curl (local dev only)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true
+    },
+    {
+      "clientId": "sentinel-ingest",
+      "name": "Core-banking feed (client credentials)",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "sentinel-ingest-dev-secret",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true
+    }
+  ],
+  "users": [
+    {
+      "username": "analyst1",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Asha",
+      "lastName": "Analyst",
+      "email": "analyst1@sentinel.local",
+      "credentials": [{ "type": "password", "value": "analyst1", "temporary": false }],
+      "realmRoles": ["ANALYST"]
+    },
+    {
+      "username": "senior1",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Sameer",
+      "lastName": "Senior",
+      "email": "senior1@sentinel.local",
+      "credentials": [{ "type": "password", "value": "senior1", "temporary": false }],
+      "realmRoles": ["SENIOR_ANALYST"]
+    },
+    {
+      "username": "admin1",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Aditi",
+      "lastName": "Admin",
+      "email": "admin1@sentinel.local",
+      "credentials": [{ "type": "password", "value": "admin1", "temporary": false }],
+      "realmRoles": ["ADMIN"]
+    },
+    {
+      "username": "service-account-sentinel-ingest",
+      "enabled": true,
+      "serviceAccountClientId": "sentinel-ingest",
+      "realmRoles": ["INGEST"]
+    }
+  ]
+}
