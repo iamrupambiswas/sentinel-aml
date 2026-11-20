@@ -39,13 +39,16 @@ services:
     environment:
       ARTEMIS_USER: admin
       ARTEMIS_PASSWORD: adminpassword
+      # broker.properties is mounted OUTSIDE the instance dir: mounting into instance/etc makes Docker create
+      # that dir as root, and on a fresh volume `artemis create` (non-root) can't write etc/login.config
+      JAVA_ARGS_APPEND: -Dbroker.properties=/opt/sentinel/broker.properties
     ports:
       - "61616:61616" # JMS Port
       - "8161:8161"   # Web Console
     volumes:
       - artemis-data:/var/lib/artemis-instance   # persistent queues survive broker restarts (X2)
       # P21: redelivery backoff + per-queue dead-letter queues for every sentinel.* address
-      - ./infra/artemis/broker.properties:/var/lib/artemis-instance/etc/broker.properties:ro
+      - ./infra/artemis/broker.properties:/opt/sentinel/broker.properties:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8161/console"]
       interval: 15s

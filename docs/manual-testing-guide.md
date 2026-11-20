@@ -47,7 +47,7 @@ Before any service starts, the service schemas don't exist yet. Each service cre
 
 ---
 
-> **Phase 5:** the broker now reads `infra/artemis/broker.properties` (5 delivery attempts with 1 s → 2 s → 4 s → 8 s backoff, then `DLQ.<queue>`). If your `sentinel-activemq` container was created before Phase 5, recreate it once so the file is mounted (queues survive, they live in the `artemis-data` volume):
+> **Phase 5:** the broker now reads `infra/artemis/broker.properties` (mounted at `/opt/sentinel/broker.properties` and passed as `-Dbroker.properties`; mounting it inside the instance's `etc/` broke first start on a fresh volume) (5 delivery attempts with 1 s → 2 s → 4 s → 8 s backoff, then `DLQ.<queue>`). If your `sentinel-activemq` container was created before Phase 5, recreate it once so the file is mounted (queues survive, they live in the `artemis-data` volume):
 > ```bash
 > docker compose up -d activemq
 > ```
@@ -116,7 +116,8 @@ In Adminer you should now see four databases: `customer_db`, `ingestion_db`, `se
    - `Sentinel-AML.postman_collection.json`
    - `Sentinel-AML-local.postman_environment.json`
 2. Top-right environment dropdown → **Sentinel AML – Local** (`baseUrl = http://localhost:8080`, the gateway).
-3. Run the folders **in order**: `00 → 01 → … → 09` (05–08 are Phase 5, 09 is Phase 6). Since Phase 6 every API call needs a Keycloak JWT: the collection logs in as `admin1` by itself before the first request and refreshes the token before it expires, so Keycloak must be up. Every request has:
+3. Run the folders **in order**: `00 → 01 → … → 09` (05–08 are Phase 5, 09 is Phase 6). Since Phase 6 every API call needs a Keycloak JWT: the collection logs in as `admin1` by itself before the first request and refreshes the token before it expires, so Keycloak must be up.
+   - **To call routes as a specific user**, open the first folder **Auth - get a token** and send `Get token: analyst1` (or `senior1`, the ingest client, `admin1`). The token is saved to `{{accessToken}}`, which every request sends, so any route you open next runs as that user. The test result shows the user and roles; copy `access_token` from the response to use it in curl or Swagger. Send `Get token: admin1` again before running folders 01–08. Every request has:
    - a **Tests** tab with assertions (green/red in the response panel),
    - a **Docs/description** with the exact SQL / redis-cli / log line to verify it.
 4. You can also run a whole folder with **Run folder** (Collection Runner). For folder 03, re-attach the CSV files first (see §6.3). Folder 08 waits about 40 s in total (broker redelivery backoff). The whole collection also runs from the CLI, from the repository root (the CSV paths are relative to it):
@@ -407,6 +408,7 @@ Health and Swagger UI stay open; Swagger's "Try it out" needs a token pasted int
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Port 8080 was already in use` | Keycloak from an old compose config, or a previous service still running | `docker compose up -d` (recreates Keycloak on 8180); `lsof -nP -iTCP:8080 -sTCP:LISTEN` then stop that PID |
+| `sentinel-activemq` exits right after start with `./etc/login.config (Permission denied)`; services log `AMQ219007: Cannot connect to server(s)` | Fresh `artemis-data` volume plus the old compose mount, which created `etc/` as root | Use the current `docker-compose.yml`. If the volume was already half-created: `docker run --rm -v sentinel-aml_artemis-data:/v alpine sh -c 'rm -f /v/etc/broker.properties && chown 1001:1001 /v/etc'`, then `docker compose up -d activemq` |
 | Every API call returns 401, or Postman logs `Keycloak token request failed` | Keycloak not up yet, or the container predates Phase 6 and has no `sentinel` realm | `docker compose up -d keycloak` (recreates it with the realm import; first start takes ~30 s), then check http://localhost:8180/realms/sentinel |
 | `Public Key Retrieval is not allowed` | MySQL 8 auth | already handled by `allowPublicKeyRetrieval=true` in the JDBC URL. Check you're running the latest build |
 | `Schema-validation: missing table` | Flyway didn't run | rebuild (`mvn clean install -DskipTests`); detection needs the flyway dependency (present since commit 5f27921) |

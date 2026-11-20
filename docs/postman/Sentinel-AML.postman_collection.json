@@ -127,6 +127,227 @@
   ],
   "item": [
     {
+      "name": "Auth - get a token (pick a user, then call any route)",
+      "description": "Keycloak token endpoint: POST {{keycloakUrl}}/protocol/openid-connect/token. Test users and the ingest client secret are in infra/keycloak/sentinel-realm.json (local dev only).",
+      "item": [
+        {
+          "name": "Get token: senior1 (SENIOR_ANALYST)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "sentinel-postman",
+                  "type": "text"
+                },
+                {
+                  "key": "username",
+                  "value": "senior1",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "senior1",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": "{{keycloakUrl}}/protocol/openid-connect/token",
+            "description": "Saves the token in the collection variable accessToken, which every request sends as Bearer. It is used until it expires (15 min); after that the collection logs in as admin1 again by itself. Copy access_token from the response to use it elsewhere (curl, Swagger, a new request with Authorization: Bearer <token>). Folders 01-08 expect admin1: send \"Get token: admin1\" again before running them."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json();",
+                  "// Every request in the collection sends {{accessToken}} (collection Authorization tab)",
+                  "pm.collectionVariables.set(\"accessToken\", t.access_token);",
+                  "pm.collectionVariables.set(\"accessTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000));",
+                  "const claims = JSON.parse(atob(t.access_token.split(\".\")[1].replace(/-/g, \"+\").replace(/_/g, \"/\")));",
+                  "console.log(\"Logged in as\", claims.preferred_username, \"roles\", claims.realm_access && claims.realm_access.roles);",
+                  "pm.test(\"token saved for \" + claims.preferred_username + \" with roles \" + JSON.stringify(claims.realm_access && claims.realm_access.roles), () => pm.expect(t.access_token).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get token: analyst1 (ANALYST, read + alert workflow)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "sentinel-postman",
+                  "type": "text"
+                },
+                {
+                  "key": "username",
+                  "value": "analyst1",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "analyst1",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": "{{keycloakUrl}}/protocol/openid-connect/token",
+            "description": "Saves the token in the collection variable accessToken, which every request sends as Bearer. It is used until it expires (15 min); after that the collection logs in as admin1 again by itself. Copy access_token from the response to use it elsewhere (curl, Swagger, a new request with Authorization: Bearer <token>). Folders 01-08 expect admin1: send \"Get token: admin1\" again before running them."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json();",
+                  "// Every request in the collection sends {{accessToken}} (collection Authorization tab)",
+                  "pm.collectionVariables.set(\"accessToken\", t.access_token);",
+                  "pm.collectionVariables.set(\"accessTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000));",
+                  "const claims = JSON.parse(atob(t.access_token.split(\".\")[1].replace(/-/g, \"+\").replace(/_/g, \"/\")));",
+                  "console.log(\"Logged in as\", claims.preferred_username, \"roles\", claims.realm_access && claims.realm_access.roles);",
+                  "pm.test(\"token saved for \" + claims.preferred_username + \" with roles \" + JSON.stringify(claims.realm_access && claims.realm_access.roles), () => pm.expect(t.access_token).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get token: ingest client (INGEST, client credentials)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "sentinel-ingest",
+                  "type": "text"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "sentinel-ingest-dev-secret",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": "{{keycloakUrl}}/protocol/openid-connect/token",
+            "description": "Saves the token in the collection variable accessToken, which every request sends as Bearer. It is used until it expires (15 min); after that the collection logs in as admin1 again by itself. Copy access_token from the response to use it elsewhere (curl, Swagger, a new request with Authorization: Bearer <token>). Folders 01-08 expect admin1: send \"Get token: admin1\" again before running them."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json();",
+                  "// Every request in the collection sends {{accessToken}} (collection Authorization tab)",
+                  "pm.collectionVariables.set(\"accessToken\", t.access_token);",
+                  "pm.collectionVariables.set(\"accessTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000));",
+                  "const claims = JSON.parse(atob(t.access_token.split(\".\")[1].replace(/-/g, \"+\").replace(/_/g, \"/\")));",
+                  "console.log(\"Logged in as\", claims.preferred_username, \"roles\", claims.realm_access && claims.realm_access.roles);",
+                  "pm.test(\"token saved for \" + claims.preferred_username + \" with roles \" + JSON.stringify(claims.realm_access && claims.realm_access.roles), () => pm.expect(t.access_token).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get token: admin1 (ADMIN, all routes) - last, so a full run continues as admin",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "sentinel-postman",
+                  "type": "text"
+                },
+                {
+                  "key": "username",
+                  "value": "admin1",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "admin1",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": "{{keycloakUrl}}/protocol/openid-connect/token",
+            "description": "Saves the token in the collection variable accessToken, which every request sends as Bearer. It is used until it expires (15 min); after that the collection logs in as admin1 again by itself. Copy access_token from the response to use it elsewhere (curl, Swagger, a new request with Authorization: Bearer <token>). Folders 01-08 expect admin1: send \"Get token: admin1\" again before running them."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json();",
+                  "// Every request in the collection sends {{accessToken}} (collection Authorization tab)",
+                  "pm.collectionVariables.set(\"accessToken\", t.access_token);",
+                  "pm.collectionVariables.set(\"accessTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000));",
+                  "const claims = JSON.parse(atob(t.access_token.split(\".\")[1].replace(/-/g, \"+\").replace(/_/g, \"/\")));",
+                  "console.log(\"Logged in as\", claims.preferred_username, \"roles\", claims.realm_access && claims.realm_access.roles);",
+                  "pm.test(\"token saved for \" + claims.preferred_username + \" with roles \" + JSON.stringify(claims.realm_access && claims.realm_access.roles), () => pm.expect(t.access_token).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "00 Health checks",
       "description": "Run these first. Every service must answer `{\"status\":\"UP\"}`.",
       "item": [
