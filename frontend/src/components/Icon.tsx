@@ -52,11 +52,26 @@ export function Icon({ name, size = 16, ...props }: { name: IconName; size?: num
 /** The Sentinel mark: a watch tower's beam over a baseline. */
 export function Logo({ size = 22 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
-      <rect width="24" height="24" rx="6" fill="var(--brand)" />
-      <path d="M5 16.5h14" stroke="var(--brand-ink)" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M8 16.5 12 6l4 10.5" stroke="var(--brand-ink)" strokeWidth="1.8" strokeLinejoin="round" fill="none" />
-      <circle cx="12" cy="6" r="1.6" fill="var(--brand-ink)" />
+    // Same mark as brand/svg/sentinel-mark.svg: shield + an "S" drawn as a transaction flow, middle node flagged
+    <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden>
+      <defs>
+        <linearGradient id="sentinel-g" x1="0" y1="0" x2="0.35" y2="1">
+          <stop offset="0" stopColor="#16897d" />
+          <stop offset="1" stopColor="#0a4f48" />
+        </linearGradient>
+      </defs>
+      <path d="M32 3.5C39 7 46 8.6 54 9.2V29C54 43.6 45 54.6 32 60.5 19 54.6 10 43.6 10 29V9.2C18 8.6 25 7 32 3.5Z" fill="url(#sentinel-g)" />
+      <path
+        d="M42 20.5C39.5 17.6 36 16 32 16 26.5 16 22.5 19 22.5 23.6 22.5 28.6 27 30 32 31.5 37 33 41.5 34.5 41.5 39.5 41.5 44 37.5 47 32 47 28 47 24.5 45.5 22 42.5"
+        fill="none"
+        stroke="#fff"
+        strokeWidth="5"
+        strokeLinecap="round"
+      />
+      <circle cx="42" cy="20.5" r="3.6" fill="#fff" />
+      <circle cx="22" cy="42.5" r="3.6" fill="#fff" />
+      <circle cx="32" cy="31.5" r="5.6" fill="#0f6b62" />
+      <circle cx="32" cy="31.5" r="3.9" fill="#f5b942" />
     </svg>
   );
 }

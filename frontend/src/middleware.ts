@@ -72,5 +72,5 @@ function unauthenticated(req: NextRequest): NextResponse {
 
 export const config = {
   // Everything except next-auth's own routes, the login page and static assets
-  matcher: ["/((?!api/auth|login|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!api/auth|login|_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png).*)"],
 };

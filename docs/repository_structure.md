@@ -6,6 +6,7 @@ This document outlines the monorepo directory structure for the Sentinel AML pro
 
 ```text
 sentinel-aml/
+├── brand/                  # Logo kit: SVG, PNG, JPG, WebP, PDF, favicons and LinkedIn images (see brand/README.md)
 ├── docs/                   # Project documentation and architectural diagrams
 │   └── ADR/                # Architecture Decision Records (e.g., ADR-001-microservices.md)
 ├── services/               # Java 21 / Spring Boot 3 backend services
