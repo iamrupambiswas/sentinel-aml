@@ -41,6 +41,7 @@ Your role decides what you see:
 | Verify the audit chain | | | ✓ |
 | Edit detection rules | | | ✓ |
 | Dead letters (replay or delete failed messages) | | | ✓ |
+| Simulation: create demo customers, send transactions, upload CSVs | | | ✓ |
 
 Local test accounts: `analyst1`, `senior1`, `admin1`. The password is the same as the username.
 
@@ -48,7 +49,7 @@ Local test accounts: `analyst1`, `senior1`, `admin1`. The password is the same a
 
 ## 3. Finding your way around
 
-- **Left sidebar.** It groups pages into *Monitoring* (Overview, Alerts, Cases), *Investigation* (Customers, Audit trail) and *Configuration* (Detection rules, Dead letters). **API reference** opens the gateway's Swagger page. On a phone the sidebar is behind the ☰ button.
+- **Left sidebar.** It groups pages into *Monitoring* (Overview, Alerts, Cases), *Investigation* (Customers, Audit trail) and *Configuration* (Detection rules, Dead letters) and, for admins, *Demo* (Simulation). **API reference** opens the gateway's Swagger page. On a phone the sidebar is behind the ☰ button.
 - **Theme.** The three buttons above your name switch between system, light and dark. Your choice is remembered.
 - **Top bar.** Breadcrumbs show where you are. The pill on the right shows the **live connection**:
   - **Live** (green, pulsing): changes arrive as they happen.
@@ -181,7 +182,36 @@ The Overview tile turns red while anything is parked.
 
 ---
 
-## 11. Common questions
+## 11. Simulation (admins, for demos and testing)
+
+In a real bank, transactions arrive from the bank's own systems: core banking, payment rails and end-of-day files. **Simulation** stands in for those systems, so you can show or test the whole flow from the console. It uses the same API a real feed uses; nothing here is a shortcut around detection.
+
+**Scenarios.** Six cards, one per detection rule. **Run scenario** creates a made-up customer and account (named `ACC-DEMO-…`), then sends the transactions that make that rule fire:
+
+| Card | What it sends | Alert you get |
+|---|---|---|
+| Large cash deposit | ₹12,00,000 cash deposit | CTR threshold |
+| Structuring (smurfing) | 3 cash deposits just under ₹8.3 lakh | Structuring |
+| Rapid movement (layering) | ₹4.87 lakh in, ₹4.53 lakh straight out | Rapid movement |
+| Sanctioned counterparty | A wire to a near-match of a watchlisted company, country IRN | High-risk jurisdiction |
+| Repeated round amounts | 5 wires in round lakhs | Round amounts |
+| Sudden change in behaviour | 10 backdated days of about ₹20,000, then ₹3.4 lakh today (takes about 10 seconds) | Behavioral deviation |
+
+- **Customer risk** (Low, Medium, High) above the cards sets the new demo customer's rating. A higher rating gives a higher alert score: × 1.0, × 1.15 and × 1.3.
+- After a run, the card shows the new account with links to its **Alerts** and its **Customer**, and the alert's notification pops up within seconds.
+- If an admin has changed a rule's thresholds on **Detection rules**, its scenario may no longer fire.
+
+**Upload a CSV.** Pick a file and click **Upload**. It's processed in the background like a bank's end-of-day file. The card follows it live and shows the rows, how many were accepted and rejected, and the reason for each rejected line. **Sample file** downloads a ready-made CSV with a structuring pattern, a large deposit, a sanctioned payee and one deliberately invalid row. Columns: `sourceAccountId, destinationAccountId, amount, currency, type`, and optionally `counterpartyName, counterpartyCountry, txnTimestamp`.
+
+**Send one transaction.** A form for a single transaction. Accounts starting with `EXT-` are outside the bank. Use an account from a scenario to add to its story: for example, another deposit into a scenario account adds evidence to its existing alert instead of raising a new one.
+
+**Bulk customers.** Adds 5,000 synthetic customers with accounts and risk ratings, so customer lookups and lists look like a real bank.
+
+**A demo in two minutes:** open **Overview** in one window and **Simulation** in another. Run *Structuring* and *Sanctioned counterparty*, watch the notifications and numbers update, open an alert, then open a case from it (§5).
+
+---
+
+## 12. Common questions
 
 | Question | Answer |
 |---|---|

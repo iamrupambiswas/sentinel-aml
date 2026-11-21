@@ -44,6 +44,7 @@
 | D12 | Startup order | **Health-gated `depends_on`**: infrastructure (MySQL, Redis, Artemis, Keycloak `/health/ready`) → four services (`/actuator/health`) → gateway → console | Retry loops in the services; `sleep` | No service starts before its broker and database accept connections; the gateway and console only start when everything behind them answers |
 | D13 | Infrastructure-only start | **An `infra` placeholder service** (`entrypoint: true`, reusing the Redis image) whose `depends_on` lists the infrastructure: `docker compose up -d infra` starts only that and returns once healthy; `docker compose up -d` still starts everything | Compose profiles for the app services; a second compose file; listing six services by hand | Profiles would flip the default (plain `up` = infrastructure only) or require `--profile` on every command, and `down`/`stop` only act on active profiles, so app containers could be left running. A second file duplicates the infrastructure. The placeholder keeps one file, one default, and `stop`/`down` cover everything |
 | D14 | Running without persistence | **`docker-compose.ephemeral.yml` override**: `!reset` the named volumes and mount **tmpfs** for MySQL, Redis, Artemis (with `exec` and uid 1001, since `artemis create` runs scripts from its instance dir) and RedisInsight; opt in with `-f`, or by default per machine with `COMPOSE_FILE` in a git-ignored `.env` | A variable in the main file; `down -v` after each session; anonymous volumes | An override layers on either mode (`up` or `up infra`) without touching the main file. tmpfs means nothing reaches disk and the user's volumes stay untouched. `down -v` would destroy data they may want later. Anonymous volumes pile up as dangling volumes. Redis also got a **named** volume in the normal mode, for the same reason: the image declares `/data`, so every recreate used to leave an anonymous volume behind |
+| D15 | Feeding data for demos | **Admin-only Simulation page** in the console: one-click scenarios (one per rule, built as tested pure functions), CSV upload with live batch progress, single transaction, bulk seed. Every call goes through the public API with the admin's token | Postman only; a separate demo app; a generator container; a backdoor endpoint that writes alerts directly | Demos shouldn't need Postman. Using the real API means a demo exercises the real path (ingestion → outbox → broker → detection → alert → SSE). A backdoor would show something the product doesn't do. Analysts never see it (ADMIN role) |
 
 ---
 
@@ -145,6 +146,8 @@ sequenceDiagram
 | Token from Keycloak accepted by the gateway and services inside Docker; 401 without | `curl` through the gateway | ✅ |
 | Customer → account → ₹12,00,000 deposit → `CTR_THRESHOLD` alert, score 39.0, processed by the containers (their logs) | `curl` through the gateway | ✅ |
 | Docker console: sign-in through Keycloak, every page renders, new alert and its audit entries visible, live stream connects | Browser | ✅ |
+| Simulation: each of the six scenarios produced exactly one alert of its own rule (scores = weight × 1.15 for a medium-risk customer); CSV upload reported line 6 rejected and raised the two expected alerts; a single transaction added evidence to an existing alert (live notification) | Browser on a production build + API | ✅ |
+| Scenario builders trip only their own rule's default conditions | `src/lib/simulation.test.ts` | ✅ |
 | Animations, auto-dismiss and hover-pause by eye | — | ⚠️ not verified (the test browser pane was hidden, which pauses animations) |
 
 ---
@@ -175,6 +178,7 @@ sequenceDiagram
 | User guide and frontend technical guide | ✅ `docs/console-user-guide.md`, `docs/frontend-technical-guide.md` |
 | Whole application from one `docker compose up` | ✅ |
 | Infrastructure alone from one command (`docker compose up -d infra`), for running services or the console yourself | ✅ tested with the five services run by hand |
+| Simulation page: six scenarios, CSV upload with rejected rows, single transaction, seeding | ✅ each scenario raised exactly its own rule's alert on the Docker stack; CSV: 5 rows, 4 accepted, 1 rejected, 2 alerts |
 | No-persistence mode (`docker-compose.ephemeral.yml`) | ✅ tested: empty MySQL on start, full pipeline works, a MySQL restart wipes it, named volumes untouched |
 | README and getting-started guide describe the one-command way and local development | ✅ |
 | CI builds the service images | ❌ CI still builds and tests the services with Maven and builds only the console image |
@@ -201,5 +205,6 @@ Then open http://localhost:3000. The full walkthrough, local development and tro
 - **How do containers validate a token issued for `localhost:8180`?** Check `iss` against the public issuer, fetch keys from `keycloak:8080` via the JWK set URI; with a JWK set URI Spring never calls discovery.
 - **How does Compose know a Spring service is ready?** `curl -f /actuator/health` health checks; `depends_on: condition: service_healthy` chains infra → services → gateway → console.
 - **How do you start only the infrastructure?** `docker compose up -d infra`: a do-nothing service that depends on it. Why not profiles? Plain `up` would stop meaning "everything", and `stop`/`down` skip inactive profiles.
+- **How do you demo it without Postman?** The admin-only Simulation page: one click per rule creates a fake customer and the transactions that trip it, through the real API, so the whole pipeline runs and the alert pops up live.
 - **How do you run with no persistence?** Layer `docker-compose.ephemeral.yml`: it resets the volumes and mounts tmpfs, so data lives in memory and dies with the container; your named volumes are never touched.
 - Try: `docker compose up -d --build`, then `docker compose ps`; `docker compose logs -f detection-service`; `docker compose stop console` and run `npm run dev` for hot reload.

@@ -53,6 +53,7 @@ frontend/
     │   ├── audit/             # log + actions.ts (verifyChain), SENIOR_ANALYST+
     │   ├── rules/             # list; [code]/ detail + edit (ADMIN), actions.ts
     │   ├── ops/               # dead letters (ADMIN), actions.ts (replay, delete)
+    │   ├── simulate/          # Simulation (ADMIN): ScenarioGrid, CsvUpload (client); actions.ts (runScenario, sendTransaction, uploadCsv, batchStatus, seedCustomers)
     │   ├── login/             # public sign-in page
     │   ├── api/auth/[...nextauth]/  # next-auth endpoints
     │   ├── api/live/          # SSE proxy to the gateway
@@ -79,6 +80,7 @@ frontend/
         ├── auth.ts            # next-auth options (Keycloak provider, callbacks)
         ├── flash.ts           # flash cookie name, type, encode/decode (tested); shared by server and client
         ├── flash-server.ts    # setFlash / flashResult for server actions
+        ├── simulation.ts      # demo scenarios (one per rule), demo customers/accounts, CSV writer (tested)
         ├── session.ts         # getSession() for server code, keycloakLogoutUrl()
         ├── tokens.ts          # JWT claims, roles, refresh, cookie chunk handling (tested)
         └── format.ts          # labels, INR/date formatting, risk severity (tested)
@@ -183,6 +185,14 @@ LiveFeed: router.refresh() 500 ms after the last change (debounced), so server d
 
 **Motion** (`globals.css`, *motion* section): `rise` (page content, staggered), `toast-in`, `toast-in-up` and `toast-out`, `countdown`, `spin`, `shimmer` (skeletons), and `draw`, `sweep` and `float` (illustrations). `prefers-reduced-motion` collapses all of them.
 
+## 6b. Simulation page
+
+`/simulate` (ADMIN) stands in for the bank's systems, so demos don't need Postman. It calls only the public API, with the admin's token: customer-service to create customers and accounts, ingestion-service for transactions (`Idempotency-Key`: a new UUID per transaction) and CSV batches, and detection-service's `baseline/recompute`.
+
+- **Scenarios** live in `lib/simulation.ts` as pure functions: `build(accountId, now)` returns `{ history, live }`. `simulation.test.ts` checks each one against its rule's *default* settings (detection-service `V4__rule_params…`), and checks that it trips **only** its own rule. If you change a rule's defaults in a migration, update both.
+- `runScenario` returns its result to the card through `useActionState` (shown inline, not as a toast): the new account, with links to its alerts and customer. The behavioural scenario sends backdated history, waits 4 s for detection to record it, recomputes baselines, then sends today's spike.
+- **CSV upload** goes through a server action. `api()` leaves the `Content-Type` to `fetch` when the body is `FormData`, and `next.config.ts` raises `serverActions.bodySizeLimit` to 50 MB to match the gateway. `CsvUpload` then polls the `batchStatus` server action every 1.5 s until the batch isn't `PROCESSING` (for at most 5 minutes). The sample file is generated in the browser from the same scenario builders.
+
 ## 7. Optimistic concurrency
 
 Alerts and cases carry a `version`. Forms send it as `expectedVersion`. If someone else changed the record first, the API answers **409**, the action shows the error as a notification, and the page re-renders the current state. Never drop `expectedVersion` from a mutation form.
@@ -233,7 +243,7 @@ npm run typecheck && npm test && npm run build
 
 - **Docker:** `docker compose up -d --build` (from the repo root) starts the console with the rest of the stack, built from `frontend/Dockerfile` into a standalone `node server.js`. In the container it reaches the gateway as `http://gateway:8080` and Keycloak as `http://keycloak:8080` (`KEYCLOAK_INTERNAL_ISSUER`), while the browser keeps using `localhost`. Rebuild just the console with `docker compose up -d --build console`.
 - **CI** (`.github/workflows/ci.yml`, job `console`): `npm ci` → typecheck → tests → production build → Docker image.
-- **Tests** live next to the code: `lib/tokens.test.ts` (claims, roles, refresh, cookie chunks), `lib/format.test.ts`, `lib/flash.test.ts` (cookie round trip, tampered values), `store/store.test.ts` (slices). Pages are covered by the manual guide and Postman/newman on the API side.
+- **Tests** live next to the code: `lib/tokens.test.ts` (claims, roles, refresh, cookie chunks), `lib/format.test.ts`, `lib/flash.test.ts` (cookie round trip, tampered values), `lib/simulation.test.ts` (each scenario trips only its rule; IDs; CSV), `store/store.test.ts` (slices). Pages are covered by the manual guide and Postman/newman on the API side.
 
 ---
 

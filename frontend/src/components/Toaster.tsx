@@ -26,7 +26,7 @@ export function Toaster() {
     <section
       aria-label="Notifications"
       aria-live="polite"
-      className="pointer-events-none fixed inset-x-3 bottom-3 z-[60] flex flex-col-reverse gap-2 sm:inset-x-auto sm:bottom-auto sm:right-4 sm:top-4 sm:w-[360px] sm:flex-col"
+      className="pointer-events-none fixed inset-x-3 bottom-3 z-[60] flex flex-col-reverse gap-2 sm:inset-x-auto sm:bottom-auto sm:right-4 sm:top-[4.25rem] sm:w-[360px] sm:flex-col"
     >
       {toasts.map((t) => (
         <ToastCard key={t.id} toast={t} />

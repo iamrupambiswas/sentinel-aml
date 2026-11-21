@@ -29,6 +29,10 @@ const PATHS = {
   refresh: "M16.5 10a6.5 6.5 0 1 1-1.9-4.6M16.5 3v3.5H13",
   home: "M3 9.5 10 3.5l7 6M5 8v8.5h10V8M8.5 16.5v-4h3v4",
   back: "M8 5 3 10l5 5M3.5 10H17",
+  play: "M6.5 4.5v11l9-5.5z",
+  upload: "M10 13V3.5M6 7.5l4-4 4 4M3.5 12.5v4h13v-4",
+  download: "M10 3.5V13M6 9l4 4 4-4M3.5 12.5v4h13v-4",
+  flask: "M8 2.5h4M8.5 2.5v5L4 15.5a1.2 1.2 0 0 0 1 1.8h10a1.2 1.2 0 0 0 1-1.8l-4.5-8v-5M6 12h8",
 } as const;
 
 export type IconName = keyof typeof PATHS;

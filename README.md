@@ -164,7 +164,7 @@ Only want the infrastructure, to run the services or console yourself? `docker c
 docker compose ps
 ```
 
-**4. Sign in** at **http://localhost:3000** → *Continue with Keycloak* → `analyst1`, `senior1` or `admin1` (password = username). [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) has a five-minute tour that creates data and walks through alerts, cases, PII reveal, the audit trail and rules.
+**4. Sign in** at **http://localhost:3000** → *Continue with Keycloak* → `analyst1`, `senior1` or `admin1` (password = username). To create data, sign in as `admin1` and open **Simulation**: one click per detection rule creates a demo customer and the transactions that trip it, and you can upload CSVs or send single transactions. [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) has a five-minute tour through alerts, cases, PII reveal, the audit trail and rules.
 
 **5. Stop** (data is kept in Docker volumes)
 ```bash

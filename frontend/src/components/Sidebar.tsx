@@ -58,6 +58,10 @@ export function Sidebar({ username, roleLabel, isSenior, isAdmin, logoutUrl, api
         { href: "/ops", label: "Dead letters", icon: "inbox", show: isAdmin },
       ],
     },
+    {
+      title: "Demo",
+      items: [{ href: "/simulate", label: "Simulation", icon: "flask", show: isAdmin }],
+    },
   ];
 
   const isActive = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));

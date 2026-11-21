@@ -19,7 +19,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     cache: "no-store",
     headers: {
       Accept: "application/json",
-      ...(init.body ? { "Content-Type": "application/json" } : {}),
+      // JSON unless it's a file upload: fetch sets the multipart boundary for FormData itself
+      ...(init.body && !(init.body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
       ...init.headers,
       Authorization: `Bearer ${session.accessToken}`,
     },
@@ -232,4 +233,16 @@ export interface AccountView {
 export interface CustomerWithAccounts {
   customer: CustomerView;
   accounts: AccountView[];
+}
+
+/** GET /api/v1/ingestion/batches/{id}: a CSV upload's progress and its rejected rows. */
+export interface BatchStatus {
+  batchId: string;
+  status: "PROCESSING" | "COMPLETED" | "FAILED";
+  totalRecords: number | null;
+  acceptedRecords: number | null;
+  failedRecords: number | null;
+  createdAt: string;
+  completedAt: string | null;
+  errors: { lineNumber: number | null; reason: string; rawData: string | null }[];
 }

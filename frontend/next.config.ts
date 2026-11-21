@@ -5,6 +5,8 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   // Self-contained server bundle for the Docker image (frontend/Dockerfile)
   output: "standalone",
+  // The Simulation page uploads transaction CSVs through a server action; match the gateway's 50 MB upload limit
+  experimental: { serverActions: { bodySizeLimit: "50mb" } },
 };
 
 export default nextConfig;

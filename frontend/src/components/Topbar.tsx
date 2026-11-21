@@ -13,6 +13,7 @@ const SECTION: Record<string, string> = {
   audit: "Audit trail",
   rules: "Detection rules",
   ops: "Dead letters",
+  simulate: "Simulation",
 };
 
 /** Breadcrumbs from the URL (first segment named, the rest shown as-is) plus the live status. */

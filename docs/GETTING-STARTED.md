@@ -82,7 +82,9 @@ How to use each page: the **[console user guide](console-user-guide.md)**.
 
 ## Step 3 — A five-minute tour
 
-You need some data first. Keep the console open in your browser, then run these four commands in a terminal. They:
+You need some data first. **The quick way:** signed in as `admin1`, open **Simulation** (left sidebar, under *Demo*) and click **Run scenario** on *Large cash deposit*. It creates a demo customer and account and sends the deposit, and an alert appears within seconds. The other cards trigger the other five rules, and you can upload a CSV there too (details in the [console user guide](console-user-guide.md#11-simulation-admins-for-demos-and-testing)).
+
+**From the command line instead** (what a bank's systems would do), run these four commands in a terminal. They:
 
 1. get an admin token,
 2. register a customer,

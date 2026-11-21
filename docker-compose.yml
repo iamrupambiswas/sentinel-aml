@@ -157,6 +157,8 @@ services:
     container_name: sentinel-infra-ready
     entrypoint: ["true"]
     restart: "no"
+    tmpfs:
+      - /data   # the image declares /data as a volume; without this every run leaves an anonymous volume behind
     depends_on:
       mysql:
         condition: service_healthy
