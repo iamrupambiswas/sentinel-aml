@@ -1,33 +1,56 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
+import { cookies } from "next/headers";
 import "./globals.css";
-import { Nav } from "@/components/Nav";
+import { Sidebar } from "@/components/Sidebar";
+import { Topbar } from "@/components/Topbar";
+import type { ThemeChoice } from "@/components/ThemeToggle";
 import { getSession, keycloakLogoutUrl } from "@/lib/session";
 import { hasRole } from "@/lib/tokens";
 
+const plexSans = IBM_Plex_Sans({ subsets: ["latin"], weight: ["400", "500", "600", "700"], variable: "--font-plex-sans", display: "swap" });
+const plexMono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-plex-mono", display: "swap" });
+
 export const metadata: Metadata = {
-  title: "Sentinel AML console",
-  description: "Analyst console: alert queue, rules and operations",
+  title: { default: "Sentinel · AML operations", template: "%s · Sentinel" },
+  description: "Anti-money-laundering operations console: alerts, cases, customers, rules and audit trail",
 };
 
+function roleLabel(roles: string[]): string {
+  if (roles.includes("ADMIN")) return "Administrator";
+  if (roles.includes("SENIOR_ANALYST")) return "Senior analyst";
+  if (roles.includes("ANALYST")) return "Analyst";
+  return "No console role";
+}
+
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  // Null on /login; every other page is behind middleware, so a session exists there
-  const session = await getSession();
+  const session = await getSession(); // null on /login; every other page is behind middleware
+  const themeCookie = (await cookies()).get("sentinel-theme")?.value;
+  const theme: ThemeChoice = themeCookie === "light" || themeCookie === "dark" ? themeCookie : "system";
 
   return (
-    <html lang="en">
-      <body className="min-h-screen font-sans antialiased">
-        {session && (
+    <html lang="en" data-theme={theme === "system" ? undefined : theme} className={`${plexSans.variable} ${plexMono.variable}`}>
+      <body className="min-h-screen font-sans text-[14px]">
+        {session ? (
           <>
-            <Nav
+            <Sidebar
               username={session.username}
-              roles={session.roles}
+              roleLabel={roleLabel(session.roles)}
+              isSenior={hasRole(session, "SENIOR_ANALYST")}
               isAdmin={hasRole(session, "ADMIN")}
               logoutUrl={keycloakLogoutUrl()}
+              theme={theme}
+              apiDocsUrl={`${process.env.GATEWAY_PUBLIC_URL ?? "http://localhost:8080"}/swagger-ui.html`}
             />
+            <div className="canvas-grid min-h-screen lg:pl-64">
+              <Topbar />
+              <main className="page mx-auto max-w-[1280px] px-4 py-6 sm:px-8 sm:py-8">{children}</main>
+            </div>
           </>
+        ) : (
+          children
         )}
-        <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
       </body>
     </html>
   );

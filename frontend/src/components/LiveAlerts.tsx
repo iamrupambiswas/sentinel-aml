@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ruleLabel } from "@/lib/format";
+import { Icon } from "./Icon";
 
 interface AlertChanged {
   alertId: string;
@@ -17,16 +18,16 @@ interface Toast extends AlertChanged {
   key: number;
 }
 
-const CHANGE_TEXT = {
-  CREATED: "New alert",
-  UPDATED: "New hit on alert",
-  STATUS_CHANGED: "Status changed",
+const CHANGE = {
+  CREATED: { text: "New alert", tone: "border-l-danger" },
+  UPDATED: { text: "New evidence on alert", tone: "border-l-warn" },
+  STATUS_CHANGED: { text: "Alert status changed", tone: "border-l-brand" },
 };
 
 /**
- * Listens to /api/live (SSE, proxied by the Next.js server to the gateway with the user's token).
- * Each change shows a short notice and re-renders the current page's server data.
- * EventSource reconnects by itself if the connection drops (gateway restart, 30-min server timeout).
+ * Listens to /api/live (SSE, piped by the Next.js server from the gateway with the user's token).
+ * Each change shows a notice and re-renders the current page's server data, debounced so a CSV batch
+ * causes one refresh, not dozens. EventSource reconnects by itself after a drop.
  */
 export function LiveAlerts() {
   const router = useRouter();
@@ -44,7 +45,6 @@ export function LiveAlerts() {
       const key = ++counter.current;
       setToasts((t) => [{ ...data, key }, ...t].slice(0, 4));
       setTimeout(() => setToasts((t) => t.filter((x) => x.key !== key)), 8000);
-      // A burst of hits (e.g. a CSV batch) causes one refresh, not dozens
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
       refreshTimer.current = setTimeout(() => router.refresh(), 500);
     });
@@ -56,21 +56,30 @@ export function LiveAlerts() {
 
   return (
     <>
-      <span className="flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-xs text-muted" title="Live alert updates">
-        <span aria-hidden className={`h-2 w-2 rounded-full ${connected ? "bg-ok" : "bg-muted"}`} />
-        {connected ? "Live" : "Connecting…"}
+      <span
+        className="inline-flex h-7 items-center gap-2 rounded-full border border-line bg-surface px-2.5 text-[12px] text-muted"
+        title={connected ? "Receiving alert changes as they happen" : "Connecting to the live alert stream"}
+      >
+        <span className="relative flex h-2 w-2" aria-hidden>
+          {connected && <span className="absolute inline-flex h-full w-full rounded-full bg-ok animate-ping-slow" />}
+          <span className={`relative inline-flex h-2 w-2 rounded-full ${connected ? "bg-ok" : "bg-line-strong"}`} />
+        </span>
+        {connected ? "Live" : "Connecting"}
       </span>
-      <div aria-live="polite" className="fixed right-3 top-16 z-20 flex w-80 max-w-[calc(100vw-1.5rem)] flex-col gap-2">
+      <div aria-live="polite" className="pointer-events-none fixed right-4 top-4 z-[60] flex w-[340px] max-w-[calc(100vw-2rem)] flex-col gap-2">
         {toasts.map((t) => (
           <Link
             key={t.key}
             href={`/alerts/${t.alertId}`}
-            className="card block p-3 text-sm shadow-md hover:border-accent"
+            className={`pointer-events-auto flex gap-3 rounded-xl border border-line border-l-[3px] ${CHANGE[t.change].tone} bg-raised p-3 shadow-pop animate-slide-in hover:border-line-strong`}
           >
-            <div className="font-medium">{CHANGE_TEXT[t.change]}</div>
-            <div className="text-muted">
-              {t.accountId} · {ruleLabel(t.ruleCode)}
-              {t.change === "STATUS_CHANGED" && t.status ? ` → ${t.status.replaceAll("_", " ").toLowerCase()}` : ""}
+            <Icon name="alert" className="mt-0.5 shrink-0 text-muted" />
+            <div className="min-w-0 text-[13px]">
+              <div className="font-medium text-ink">{CHANGE[t.change].text}</div>
+              <div className="truncate text-muted">
+                <span className="font-mono">{t.accountId}</span> · {ruleLabel(t.ruleCode)}
+                {t.change === "STATUS_CHANGED" && t.status ? ` → ${t.status.replaceAll("_", " ").toLowerCase()}` : ""}
+              </div>
             </div>
           </Link>
         ))}

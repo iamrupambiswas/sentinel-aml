@@ -6,8 +6,13 @@ import { readSessionCookie, type SessionToken } from "./tokens";
 export async function getSession(): Promise<SessionToken | null> {
   const raw = readSessionCookie((await cookies()).getAll());
   if (!raw) return null;
-  const token = (await decode({ token: raw, secret: process.env.NEXTAUTH_SECRET! })) as unknown as SessionToken | null;
-  return token?.accessToken ? token : null;
+  try {
+    const token = (await decode({ token: raw, secret: process.env.NEXTAUTH_SECRET! })) as unknown as SessionToken | null;
+    return token?.accessToken ? token : null;
+  } catch {
+    // Encrypted with another secret (NEXTAUTH_SECRET rotated, or a cookie from another setup): not signed in
+    return null;
+  }
 }
 
 export function keycloakLogoutUrl(): string {

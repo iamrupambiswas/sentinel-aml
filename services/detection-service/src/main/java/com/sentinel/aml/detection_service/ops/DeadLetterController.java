@@ -6,6 +6,7 @@ import com.sentinel.aml.common.dto.ApiResponse;
 import com.sentinel.aml.detection_service.ops.DeadLetterService.DeadLetter;
 import com.sentinel.aml.detection_service.ops.DeadLetterService.DeadLetterQueueInfo;
 import com.sentinel.aml.detection_service.ops.DeadLetterService.ReplayResult;
+import com.sentinel.aml.common.audit.AuditPublisher;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Dead-letter operations (P21). Lives in detection-service because it already talks to the broker;
@@ -32,6 +34,7 @@ import java.util.List;
 public class DeadLetterController {
 
     private final DeadLetterService deadLetters;
+    private final AuditPublisher audit;
     private final JmsTemplate jmsTemplate;
 
     @Value("${sentinel.ops.poison-test-enabled:false}")
@@ -54,6 +57,7 @@ public class DeadLetterController {
                                                             @RequestParam(name = "messageId", required = false) String messageId,
                                                             @RequestParam(name = "max", defaultValue = "100") int max) {
         ReplayResult result = deadLetters.replay(queue, messageId, Math.min(Math.max(max, 1), 1000));
+        audit.record("DLQ_REPLAYED", "DEAD_LETTER", queue, Map.of("replayed", result.replayed(), "messageIds", result.messageIds()));
         return ok(result, "Replayed " + result.replayed() + " message(s) to " + queue);
     }
 
@@ -61,6 +65,7 @@ public class DeadLetterController {
     public ResponseEntity<ApiResponse<String>> delete(@PathVariable("queue") String queue,
                                                       @PathVariable("messageId") String messageId) {
         deadLetters.delete(queue, messageId);
+        audit.record("DLQ_MESSAGE_DELETED", "DEAD_LETTER", queue, Map.of("messageId", messageId));
         return ok(messageId, "Dead letter deleted permanently");
     }
 

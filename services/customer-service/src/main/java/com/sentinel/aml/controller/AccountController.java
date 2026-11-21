@@ -8,6 +8,8 @@ import com.sentinel.aml.dto.AccountDtos.RiskRatingChangeRequest;
 import com.sentinel.aml.service.AccountService;
 import com.sentinel.aml.service.AccountService.CustomerWithAccounts;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -29,6 +31,15 @@ public class AccountController {
     public ResponseEntity<ApiResponse<CustomerWithAccounts>> getCustomer(@PathVariable("customerId") String customerId) {
         return ok(HttpStatus.OK, accountService.getCustomer(customerId), null);
     }
+
+    /** Full national ID, SENIOR_ANALYST+ only, with a required reason; every call is audited (PII_REVEALED). */
+    @PostMapping(ApiRoutes.CUSTOMERS + "/{customerId}/national-id/reveal")
+    public ResponseEntity<ApiResponse<AccountService.NationalIdView>> revealNationalId(
+            @PathVariable("customerId") String customerId, @Valid @RequestBody RevealRequest request) {
+        return ok(HttpStatus.OK, accountService.revealNationalId(customerId, request.reason()), "Revealed and audited");
+    }
+
+    public record RevealRequest(@NotBlank @Size(max = 300) String reason) {}
 
     @PostMapping(ApiRoutes.CUSTOMERS + "/{customerId}/accounts")
     public ResponseEntity<ApiResponse<AccountResponse>> openAccount(@PathVariable("customerId") String customerId,

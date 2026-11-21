@@ -1,4 +1,6 @@
-# Manual run & test guide (Phases 1–7)
+# Manual run & test guide (Phases 1–7b)
+
+> **New here? Start with [GETTING-STARTED.md](GETTING-STARTED.md)**: the short, step-by-step way to run everything and take a tour. This guide is the detailed reference: what to check in each folder, SQL, Redis and broker queries.
 
 Everything here is done by hand: Docker Compose, one terminal per service, Postman for the API, and Adminer, `mysql`, `redis-cli`, the Artemis console and the service logs to see what happened inside.
 
@@ -134,7 +136,7 @@ In Adminer you should now see four databases: `customer_db`, `ingestion_db`, `se
    - `Sentinel-AML.postman_collection.json`
    - `Sentinel-AML-local.postman_environment.json`
 2. Top-right environment dropdown → **Sentinel AML – Local** (`baseUrl = http://localhost:8080`, the gateway).
-3. Run the folders **in order**: `00 → 01 → … → 10` (05–08 are Phase 5, 09 is Phase 6, 10 is Phase 7). Since Phase 6 every API call needs a Keycloak JWT: the collection logs in as `admin1` by itself before the first request and refreshes the token before it expires, so Keycloak must be up.
+3. Run the folders **in order**: `00 → 01 → … → 11` (05–08 are Phase 5, 09 is Phase 6, 10 is Phase 7, 11 is Phase 7b). A full run is 125 requests and 208 assertions. Since Phase 6 every API call needs a Keycloak JWT: the collection logs in as `admin1` by itself before the first request and refreshes the token before it expires, so Keycloak must be up.
    - **To call routes as a specific user**, open the first folder **Auth - get a token** and send `Get token: analyst1` (or `senior1`, the ingest client, `admin1`). The token is saved to `{{accessToken}}`, which every request sends, so any route you open next runs as that user. The test result shows the user and roles; copy `access_token` from the response to use it in curl or Swagger. Send `Get token: admin1` again before running folders 01–08. Every request has:
    - a **Tests** tab with assertions (green/red in the response panel),
    - a **Docs/description** with the exact SQL / redis-cli / log line to verify it.
@@ -454,6 +456,29 @@ You get `event:connected`, a `:keep-alive` comment every 25 s, and an `event:ale
 | `/rules/CTR_THRESHOLD` as `admin1` → change weight, give a reason | Saved as the next version, history shows `admin1`, state *Live* |
 | `/ops` as `admin1` after a poison test | Message body, *Replay* / *Delete* |
 
+### 6.8 Folder 11: cases, audit trail, PII (Phase 7b)
+
+| # | Request | Expect |
+|---|---|---|
+| 1 | Onboard a customer (admin) | 201, `idNumberMasked` like `*********234Z` |
+| 2–4 | Reveal national ID as analyst / senior without reason / senior with reason | 403 / 400 / 200 with the full value |
+| 5–6 | CTR transaction on a fresh account, then find its alert | 202, then one `CTR_THRESHOLD` alert |
+| 7–9 | Analyst opens a case; alert shows `caseId`; same alert in a second case | 201 / 200 / 409 |
+| 10–11 | Close as analyst / as senior with a resolution | 403 / 200, history starts with `CASE_CLOSED` by senior1 |
+| 12–14 | Audit as analyst / senior / verify as admin | 403 / reveal and onboarding listed / `valid: true` |
+| 15 | `GET /v3/api-docs/alert-case` through the gateway, no token | 200, documents `/api/v1/cases`, server = gateway |
+
+```sql
+SELECT seq, actor, action, entity_type, entity_id, LEFT(hash, 12) AS hash FROM alert_case_db.audit_event ORDER BY seq DESC LIMIT 10;
+SELECT * FROM alert_case_db.audit_chain_head;
+UPDATE alert_case_db.audit_event SET actor = 'x' WHERE seq = 1;   -- fails: "audit_event is append-only"
+SELECT id, title, status, priority, assignee FROM alert_case_db.aml_case ORDER BY id DESC;
+```
+
+The customer-service log line for `registerCustomer` now shows `idNumber=***`.
+
+**Combined API reference:** http://localhost:8080/swagger-ui.html: pick a service at the top right, click **Authorize**, paste an access token.
+
 ---
 
 ## 7. Troubleshooting
@@ -467,6 +492,9 @@ You get `event:connected`, a `:keep-alive` comment every 25 s, and an `event:ale
 | Header stays on *Connecting…* | alert-case-service down, or the gateway is older than Phase 7 (SSE buffered) | Start alert-case; rebuild the services (Spring Cloud 2023.0.6) |
 | Console pages return 500 after running `npm run build` | `build` and `dev` share `frontend/.next`; the build overwrote the dev server's files | Stop `npm run dev`, `rm -rf frontend/.next`, start it again |
 | Many `429 Too Many Requests` during your own scripts | The gateway rate limit (burst 100, 20/s per user) | Slow down, or raise `RATE_LIMIT_CAPACITY` / `RATE_LIMIT_REFILL_PER_SECOND` for the gateway |
+| Audit trail misses events from customer or detection | They travel over `sentinel.audit.events`; alert-case was down, or they are in its DLQ | Start alert-case; on **Dead letters** (admin) replay `sentinel.audit.events` |
+| alert-case fails on start: `You do not have the SUPER privilege and binary logging is enabled` | The V2 migration creates triggers; your DB user isn't root | Run migrations as root, or start MySQL with `--log-bin-trust-function-creators=1` |
+| Console in Docker: sign-in loops or `issuer mismatch` | Keycloak started without the Phase 7b flags | `docker compose up -d keycloak` (recreates it with `--hostname-url`) |
 | Every API call returns 401, or Postman logs `Keycloak token request failed` | Keycloak not up yet, or the container predates Phase 6 and has no `sentinel` realm | `docker compose up -d keycloak` (recreates it with the realm import; first start takes ~30 s), then check http://localhost:8180/realms/sentinel |
 | `Public Key Retrieval is not allowed` | MySQL 8 auth | already handled by `allowPublicKeyRetrieval=true` in the JDBC URL. Check you're running the latest build |
 | `Schema-validation: missing table` | Flyway didn't run | rebuild (`mvn clean install -DskipTests`); detection needs the flyway dependency (present since commit 5f27921) |

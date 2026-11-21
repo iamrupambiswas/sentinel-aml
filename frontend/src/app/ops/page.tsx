@@ -1,10 +1,20 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { api, errorMessage, type DeadLetter, type DeadLetterQueueInfo } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { getSession } from "@/lib/session";
 import { hasRole } from "@/lib/tokens";
-import { ErrorPanel, Flash, PageHeader } from "@/components/ui";
+import { Icon } from "@/components/Icon";
+import { EmptyState, ErrorPanel, Flash, PageHeader } from "@/components/ui";
 import { remove, replay } from "./actions";
+
+export const metadata: Metadata = { title: "Dead letters" };
+
+const QUEUE_ROLE: Record<string, string> = {
+  "sentinel.txn.ingested": "Transactions waiting for detection",
+  "sentinel.detection.hits": "Rule hits waiting to become alerts",
+  "sentinel.audit.events": "Audit events waiting to be chained",
+};
 
 export default async function OpsPage({ searchParams }: { searchParams: Promise<{ queue?: string; msg?: string; err?: string }> }) {
   const { queue, msg, err } = await searchParams;
@@ -15,76 +25,84 @@ export default async function OpsPage({ searchParams }: { searchParams: Promise<
   let queues: DeadLetterQueueInfo[] = [];
   let letters: DeadLetter[] | null = null;
   let error: string | null = null;
+  const pick = (qs: DeadLetterQueueInfo[]) => queue ?? qs.find((q) => q.depth > 0)?.sourceQueue ?? qs[0]?.sourceQueue;
   try {
     queues = await api<DeadLetterQueueInfo[]>("/api/v1/ops/dlq");
-    const selected = queue ?? queues.find((q) => q.depth > 0)?.sourceQueue;
+    const selected = pick(queues);
     if (selected) letters = await api<DeadLetter[]>(`/api/v1/ops/dlq/${encodeURIComponent(selected)}?max=50`);
   } catch (e) {
     error = errorMessage(e);
   }
-  const selected = queue ?? queues.find((q) => q.depth > 0)?.sourceQueue;
+  const selected = pick(queues);
 
   return (
     <>
       <PageHeader
+        eyebrow="Configuration"
         title="Dead letters"
-        subtitle="Messages that failed 5 delivery attempts (1 s → 2 s → 4 s → 8 s backoff). Fix the cause, then replay; delete only what can never be processed."
+        description="Messages that failed five delivery attempts (1 s, 2 s, 4 s, 8 s backoff) are parked here so the queue keeps flowing. Fix the cause, then replay. Delete only what can never be processed."
       />
       <Flash msg={msg} err={err} />
       {error && <ErrorPanel message={error} />}
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-2">
+      <div className="mb-5 grid gap-4 md:grid-cols-3">
         {queues.map((q) => (
           <Link
             key={q.sourceQueue}
             href={`/ops?queue=${encodeURIComponent(q.sourceQueue)}`}
             aria-current={q.sourceQueue === selected ? "true" : undefined}
-            className={`card block p-4 hover:border-accent ${q.sourceQueue === selected ? "border-accent" : ""}`}
+            className={`card block p-5 transition-[border-color,transform] duration-150 hover:-translate-y-0.5 ${
+              q.sourceQueue === selected ? "border-brand ring-3 ring-brand/10" : "hover:border-line-strong"
+            }`}
           >
-            <div className="font-mono text-sm">{q.sourceQueue}</div>
-            <div className="mt-1 flex items-baseline gap-2">
-              <span className={`text-2xl font-semibold tabular-nums ${q.depth > 0 ? "text-danger" : ""}`}>{q.depth}</span>
-              <span className="text-xs text-muted">in {q.deadLetterQueue}</span>
+            <div className="eyebrow">{QUEUE_ROLE[q.sourceQueue] ?? "Queue"}</div>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className={`text-[28px] font-semibold leading-none tabular-nums ${q.depth > 0 ? "text-danger" : "text-ok"}`}>{q.depth}</span>
+              <span className="text-[12px] text-muted">parked</span>
             </div>
+            <div className="mt-2 truncate font-mono text-[11.5px] text-muted">{q.deadLetterQueue}</div>
           </Link>
         ))}
       </div>
 
       {selected && letters && (
-        <section aria-labelledby="dlq-h" className="card">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line p-3">
-            <h2 id="dlq-h" className="font-mono text-sm font-semibold">{selected}</h2>
+        <section aria-labelledby="dlq-h" className="card overflow-hidden">
+          <div className="card-head">
+            <h2 id="dlq-h" className="card-title font-mono">{selected}</h2>
             {letters.length > 0 && (
               <form action={replay}>
                 <input type="hidden" name="queue" value={selected} />
-                <button className="btn btn-primary" type="submit">Replay all {letters.length}</button>
+                <button className="btn btn-primary h-7" type="submit">Replay all {letters.length}</button>
               </form>
             )}
           </div>
           {letters.length === 0 ? (
-            <p className="p-6 text-center text-sm text-muted">No dead letters. Every message on this queue was processed.</p>
+            <EmptyState icon="check" title="Nothing parked">Every message on this queue was processed.</EmptyState>
           ) : (
             <ul>
               {letters.map((l) => (
-                <li key={l.messageId} className="border-b border-line p-3 last:border-0">
+                <li key={l.messageId} className="border-b border-line p-4 last:border-0">
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-xs text-muted">
-                      <span className="font-mono">{l.messageId}</span> · type {l.type ?? "unknown"} · first sent {formatDateTime(l.firstSentAt)}
+                    <div className="text-[12px] text-muted">
+                      <span className="font-mono text-ink-2">{l.messageId}</span> · {l.type ?? "unknown type"} · first sent {formatDateTime(l.firstSentAt)}
                     </div>
                     <div className="flex gap-2">
                       <form action={replay}>
                         <input type="hidden" name="queue" value={selected} />
                         <input type="hidden" name="messageId" value={l.messageId} />
-                        <button className="btn" type="submit">Replay</button>
+                        <button className="btn h-7" type="submit">
+                          <Icon name="activity" size={13} />
+                          Replay
+                        </button>
                       </form>
                       <form action={remove}>
                         <input type="hidden" name="queue" value={selected} />
                         <input type="hidden" name="messageId" value={l.messageId} />
-                        <button className="btn btn-danger" type="submit">Delete</button>
+                        <button className="btn btn-danger h-7" type="submit">Delete</button>
                       </form>
                     </div>
                   </div>
-                  <pre className="overflow-x-auto rounded bg-canvas p-2 font-mono text-xs">{l.body}</pre>
+                  <pre className="overflow-x-auto rounded-lg bg-sunken p-3 font-mono text-[12px] leading-relaxed text-ink-2">{l.body}</pre>
                 </li>
               ))}
             </ul>

@@ -64,12 +64,41 @@ services:
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
-    # Imports the sentinel realm (roles, clients, test users) on first start; skipped if it already exists
-    command: start-dev --import-realm
+    # Imports the sentinel realm (roles, clients, test users) on first start; skipped if it already exists.
+    # --hostname-url fixes the public address, so every token says iss=http://localhost:8180/realms/sentinel
+    # even when fetched from inside Docker (console container -> http://keycloak:8080). Back-channel URLs
+    # (token, JWKS) still follow the request, so containers can reach them.
+    command: start-dev --import-realm --hostname-url=http://localhost:8180 --hostname-strict-backchannel=false
     volumes:
       - ./infra/keycloak:/opt/keycloak/data/import:ro
     ports:
       - "8180:8080"   # host 8180 -> Keycloak; host 8080 is reserved for the API gateway
+    networks:
+      - sentinel-network
+
+  # Analyst console (Phase 7b). Optional: only starts with the "console" profile:
+  #   docker compose --profile console up -d --build console
+  # The Java services run on your machine, so the container reaches the gateway through host.docker.internal.
+  console:
+    profiles: ["console"]
+    build: ./frontend
+    image: sentinel-console:local
+    container_name: sentinel-console
+    environment:
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${CONSOLE_NEXTAUTH_SECRET:-change-me-local-only-console-secret}
+      KEYCLOAK_ISSUER: http://localhost:8180/realms/sentinel        # public: browser + token "iss"
+      KEYCLOAK_INTERNAL_ISSUER: http://keycloak:8080/realms/sentinel # how the container reaches Keycloak
+      KEYCLOAK_CLIENT_ID: sentinel-console
+      KEYCLOAK_CLIENT_SECRET: sentinel-console-dev-secret
+      GATEWAY_URL: http://host.docker.internal:8080
+      GATEWAY_PUBLIC_URL: http://localhost:8080
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # needed on Linux; Docker Desktop already has it
+    ports:
+      - "3000:3000"
+    depends_on:
+      - keycloak
     networks:
       - sentinel-network
 

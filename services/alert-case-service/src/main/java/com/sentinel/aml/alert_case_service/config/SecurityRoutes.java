@@ -16,6 +16,13 @@ public class SecurityRoutes {
     public RouteRules routeRules() {
         return auth -> auth
                 .requestMatchers(GET, ApiRoutes.ALERTS + "/**").hasRole(ANALYST)
-                .requestMatchers(PATCH, ApiRoutes.ALERTS + "/*/status").hasRole(ANALYST);
+                .requestMatchers(PATCH, ApiRoutes.ALERTS + "/*/status").hasRole(ANALYST)
+                // Phase 7b: cases (closing additionally needs SENIOR_ANALYST, checked in CaseService)
+                .requestMatchers(GET, ApiRoutes.CASES, ApiRoutes.CASES + "/**").hasRole(ANALYST)
+                .requestMatchers(POST, ApiRoutes.CASES, ApiRoutes.CASES + "/*/alerts", ApiRoutes.CASES + "/*/notes").hasRole(ANALYST)
+                .requestMatchers(PATCH, ApiRoutes.CASES + "/*").hasRole(ANALYST)
+                // Phase 7b: audit log - verifying the whole chain is an admin task, reading it is for seniors
+                .requestMatchers(GET, ApiRoutes.AUDIT + "/verify").hasRole(ADMIN)
+                .requestMatchers(GET, ApiRoutes.AUDIT, ApiRoutes.AUDIT + "/**").hasRole(SENIOR_ANALYST);
     }
 }

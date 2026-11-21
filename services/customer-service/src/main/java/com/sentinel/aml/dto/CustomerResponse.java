@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 
 /**
  * API view of a customer. Never return the JPA entity: it carries the DECRYPTED id_number
- * (and lazy collections). Phase 6 will show the full value only to SENIOR_ANALYST+.
+ * (and lazy collections). The full value is only available through the audited reveal endpoint (Phase 7b).
  */
 public record CustomerResponse(
         String id,

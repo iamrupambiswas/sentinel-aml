@@ -25,6 +25,9 @@ class CustomerProfileServiceImplTest {
     @Mock
     private CustomerRepository customerRepository;
 
+    @Mock
+    private com.sentinel.aml.common.audit.AuditPublisher audit;
+
     @InjectMocks
     private CustomerProfileServiceImpl customerProfileService;
 

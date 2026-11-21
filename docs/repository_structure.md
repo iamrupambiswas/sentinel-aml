@@ -15,7 +15,8 @@ sentinel-aml/
 │   ├── ingestion-service/  # REST + CSV Batch ingestion, validation, FX to INR, and outbox pattern
 │   ├── detection-service/  # Core AML rule engine, risk scoring, and hot-reloading
 │   └── alert-case-service/ # Alert de-duplication, case management, and immutable hash-chained audit log
-├── frontend/               # Next.js 15 analyst console (Phase 7): Keycloak login on the server, live alerts over SSE, Tailwind
+├── .github/workflows/      # CI: Java tests, console type check/tests/build, console Docker image (Phase 7b)
+├── frontend/               # Next.js 15 analyst console (Phase 7/7b): Keycloak login on the server, live alerts over SSE, Tailwind, Dockerfile
 ├── infra/                  # Infrastructure as Code (Terraform)
 │   ├── artemis/            # broker.properties: redelivery backoff + per-queue DLQs (mounted by docker-compose, Phase 5)
 │   ├── keycloak/           # sentinel-realm.json: roles, clients, test users (imported by docker-compose, Phase 6)

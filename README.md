@@ -10,6 +10,8 @@
 
 ---
 
+> **Run it locally:** follow **[docs/GETTING-STARTED.md](docs/GETTING-STARTED.md)**: tools, five commands, sign in, and a five-minute tour.
+
 ## 🏗️ Architecture
 
 The system utilizes an event-driven architecture with bounded contexts. Synchronous REST calls are reserved for the Gateway and UI, while the core detection pipeline is fully asynchronous to meet latency guarantees under high throughput.
@@ -175,7 +177,8 @@ cd services && mvn test
 | MySQL (`sentinel-mysql`, :3306) | **Adminer** → http://localhost:8081 | System `MySQL`, server `mysql`, user `root`, password `root` | Databases: `customer_db`, `ingestion_db`, `sentinel_detection`, `alert_case_db` |
 | Redis (`sentinel-redis`, :6379) | **RedisInsight** → http://localhost:5540 | none | First time: *Add Redis database* → host `redis`, port `6379` |
 | ActiveMQ Artemis (`sentinel-activemq`, :61616) | **Artemis console** → http://localhost:8161/console | `admin` / `adminpassword` | *Artemis* tab → *Queues*: `sentinel.txn.ingested`, `sentinel.detection.hits`, topic `sentinel.rules.changed`, `DLQ.sentinel.*` (redelivery policy: `infra/artemis/broker.properties`) |
-| Analyst console (`frontend/`, :3000) | **Sentinel console** → http://localhost:3000 | `analyst1` / `senior1` / `admin1` (password = username) | Next.js; `cd frontend && npm install && npm run dev` after copying `.env.example` to `.env.local` (Phase 7) |
+| Analyst console (`frontend/`, :3000) | **Sentinel console** → http://localhost:3000 | `analyst1` / `senior1` / `admin1` (password = username) | `npm run dev` in `frontend/`, or `docker compose --profile console up -d --build console`. Step by step: [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) |
+| API reference (all services) | **Swagger UI** → http://localhost:8080/swagger-ui.html | Click *Authorize*, paste a token | Served by the gateway; *Try it out* goes through the gateway (Phase 7b) |
 | Keycloak (`sentinel-keycloak`) | **Admin console** → http://localhost:8180/admin | `admin` / `admin` | Realm `sentinel` is imported on start from `infra/keycloak/sentinel-realm.json` (roles, clients, test users) |
 
 Command-line alternatives: `docker exec -it sentinel-mysql mysql -uroot -proot --default-character-set=utf8mb4` and `docker exec -it sentinel-redis redis-cli`.

@@ -11,6 +11,8 @@ import com.sentinel.aml.alert_case_service.entity.Alert;
 import com.sentinel.aml.alert_case_service.entity.AlertStatus;
 import com.sentinel.aml.alert_case_service.repository.AlertHitRepository;
 import com.sentinel.aml.alert_case_service.repository.AlertRepository;
+import com.sentinel.aml.alert_case_service.audit.AuditLog;
+import com.sentinel.aml.alert_case_service.cases.CaseService;
 import com.sentinel.aml.common.event.AlertChangedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +43,8 @@ public class AlertQueryService {
     private final AlertRepository alertRepository;
     private final AlertHitRepository hitRepository;
     private final ApplicationEventPublisher events;
+    private final AuditLog auditLog;
+    private final CaseService cases;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
@@ -57,7 +61,7 @@ public class AlertQueryService {
                 .map(h -> HitView.from(h, parseEvidence(h.getEvidenceTxnIds())))
                 .toList();
         return new AlertDetail(AlertSummary.from(alert), alert.getDedupKey(), alert.getStatusNote(),
-                alert.getStatusChangedAt(), new ArrayList<>(alert.getStatus().allowedNext()), hits);
+                alert.getStatusChangedAt(), new ArrayList<>(alert.getStatus().allowedNext()), hits, cases.caseOfAlert(id));
     }
 
     @Transactional
@@ -84,6 +88,10 @@ public class AlertQueryService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Alert " + id + " was changed concurrently. Reload and retry.");
         }
         log.info("Alert {} moved {} -> {}", id, from, request.status());
+        // Same transaction: the status change and its audit entry commit together
+        auditLog.record("ALERT_STATUS_CHANGED", "ALERT", alert.getId(), request.note() == null || request.note().isBlank()
+                ? Map.of("from", from.name(), "to", request.status().name())
+                : Map.of("from", from.name(), "to", request.status().name(), "note", request.note()));
         events.publishEvent(new AlertChangedEvent(alert.getId(), alert.getAccountId(), alert.getRuleCode(),
                 AlertChangedEvent.Change.STATUS_CHANGED, request.status().name(), clock.instant()));
         return AlertSummary.from(alert);

@@ -56,7 +56,9 @@ class AlertDedupConcurrencyTest {
     private static final String[] BUCKETS = {"20521", "20522"};
 
     @Container
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0").withDatabaseName("alert_case_db");
+    // log-bin-trust-function-creators: lets a non-SUPER user create V2's audit triggers (binary logging is on)
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0").withDatabaseName("alert_case_db")
+            .withCommand("--log-bin-trust-function-creators=1");
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

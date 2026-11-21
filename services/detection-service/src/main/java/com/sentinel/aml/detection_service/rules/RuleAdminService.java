@@ -1,5 +1,6 @@
 package com.sentinel.aml.detection_service.rules;
 
+import com.sentinel.aml.common.audit.AuditPublisher;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sentinel.aml.detection_service.engine.DetectionRule;
@@ -54,10 +55,11 @@ public class RuleAdminService {
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final Map<String, DetectionRule> rulesByCode;
+    private final AuditPublisher audit;
 
     public RuleAdminService(AmlRuleRepository ruleRepository, AmlRuleVersionRepository versionRepository,
                             RuleCacheService ruleCache, ApplicationEventPublisher events, ObjectMapper objectMapper,
-                            Clock clock, List<DetectionRule> rules) {
+                            Clock clock, List<DetectionRule> rules, AuditPublisher audit) {
         this.ruleRepository = ruleRepository;
         this.versionRepository = versionRepository;
         this.ruleCache = ruleCache;
@@ -65,6 +67,7 @@ public class RuleAdminService {
         this.objectMapper = objectMapper;
         this.clock = clock;
         this.rulesByCode = rules.stream().collect(Collectors.toMap(DetectionRule::getRuleCode, Function.identity()));
+        this.audit = audit;
     }
 
     @Transactional(readOnly = true)
@@ -143,6 +146,7 @@ public class RuleAdminService {
                 LocalDateTime.ofInstant(now, ZoneOffset.UTC)));
         events.publishEvent(new RuleChangedApplicationEvent(code, rule.getVersion(), changedBy, now));
         log.info("Rule {} updated to version {} by {}: {}", code, rule.getVersion(), changedBy, req.reason());
+        audit.record("RULE_CHANGED", "RULE", code, Map.of("version", rule.getVersion(), "reason", req.reason()));
         // loadedVersion still shows the OLD version here: the reload happens after commit
         return toView(rule, ruleCache.getActiveRules());
     }

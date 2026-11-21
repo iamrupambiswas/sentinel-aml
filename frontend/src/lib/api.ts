@@ -92,6 +92,8 @@ export interface AlertDetail {
   statusChangedAt: string | null;
   allowedNextStatuses: AlertStatus[];
   hits: HitView[];
+  /** Investigation case this alert belongs to, if any */
+  caseId: number | null;
 }
 
 export interface Page<T> {
@@ -147,4 +149,87 @@ export interface DeadLetter {
   originalQueue: string | null;
   firstSentAt: string | null;
   body: string;
+}
+
+// ---- Phase 7b: cases, audit, customers ----
+
+export type CaseStatus = "OPEN" | "INVESTIGATING" | "CLOSED_NO_ACTION" | "CLOSED_REPORTED";
+export type Priority = "LOW" | "MEDIUM" | "HIGH";
+
+export interface CaseSummary {
+  id: number;
+  caseNumber: string;
+  title: string;
+  status: CaseStatus;
+  priority: Priority;
+  assignee: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  alertCount: number;
+  maxRisk: number | null;
+  version: number;
+}
+
+export interface AuditEntry {
+  seq: number;
+  eventId: string;
+  occurredAt: string;
+  recordedAt: string;
+  service: string;
+  actor: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  /** Canonical JSON text */
+  details: string;
+  hash: string;
+}
+
+export interface CaseDetail {
+  summary: CaseSummary;
+  resolution: string | null;
+  closedAt: string | null;
+  allowedNextStatuses: CaseStatus[];
+  alerts: AlertSummary[];
+  notes: { id: number; author: string; body: string; createdAt: string }[];
+  history: AuditEntry[];
+}
+
+export interface VerifyResult {
+  valid: boolean;
+  checked: number;
+  firstBrokenSeq: number | null;
+  problem: string | null;
+  headHash: string | null;
+}
+
+export type RiskRating = "LOW" | "MEDIUM" | "HIGH";
+
+export interface CustomerView {
+  id: string;
+  type: string;
+  fullName: string;
+  idNumberMasked: string;
+  dob: string;
+  nationality: string;
+  riskRating: RiskRating;
+  onboardedAt: string;
+}
+
+export interface AccountView {
+  id: string;
+  customerId: string;
+  type: string;
+  currency: string;
+  status: string;
+  accountRiskRating: RiskRating;
+  customerRiskRating: RiskRating;
+  effectiveRiskRating: RiskRating;
+  openedAt: string;
+}
+
+export interface CustomerWithAccounts {
+  customer: CustomerView;
+  accounts: AccountView[];
 }

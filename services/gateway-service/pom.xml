@@ -30,6 +30,11 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
 		</dependency>
+		<!-- Phase 7b: one Swagger UI for every service's API (version managed by the parent) -->
+		<dependency>
+			<groupId>org.springdoc</groupId>
+			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+		</dependency>
 		<!-- Phase 7: per-caller token bucket for rate limiting (shared by every gateway pod) -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

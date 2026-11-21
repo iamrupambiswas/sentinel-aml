@@ -8,7 +8,7 @@ function jwt(payload: object): string {
 }
 
 const analystToken = jwt({ preferred_username: "analyst1", sub: "u-1", realm_access: { roles: ["ANALYST", "default-roles-sentinel"] } });
-const cfg = { issuer: "http://kc/realms/sentinel", clientId: "sentinel-console", clientSecret: "s" };
+const cfg = { issuer: "http://kc/realms/sentinel", internalIssuer: "http://kc/realms/sentinel", clientId: "sentinel-console", clientSecret: "s" };
 
 describe("claims", () => {
   it("reads username and realm roles from a Keycloak access token", () => {

@@ -37,9 +37,10 @@ public final class AlertDtos {
         }
     }
 
+    /** @param caseId the investigation case this alert belongs to, or null (Phase 7b) */
     public record AlertDetail(AlertSummary alert, String dedupKey, String statusNote,
                               LocalDateTime statusChangedAt, List<AlertStatus> allowedNextStatuses,
-                              List<HitView> hits) {}
+                              List<HitView> hits, Long caseId) {}
 
     /**
      * @param expectedVersion optional optimistic-lock check: the version the analyst was looking at.

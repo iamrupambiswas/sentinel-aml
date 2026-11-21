@@ -18,6 +18,9 @@ export const authOptions: NextAuthOptions = {
       clientId: kc.clientId,
       clientSecret: kc.clientSecret,
       issuer: kc.issuer,
+      // Discovery via the internal URL: Keycloak answers with the public authorization URL (for the browser)
+      // and back-channel token/JWKS URLs this server can reach. Same URL outside Docker.
+      wellKnown: `${kc.internalIssuer}/.well-known/openid-configuration`,
       checks: ["pkce", "state"],
     }),
   ],

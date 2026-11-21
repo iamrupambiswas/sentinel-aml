@@ -21,7 +21,10 @@ export interface KeycloakTokenResponse {
 }
 
 export interface KeycloakConfig {
+  /** Public issuer: what the browser uses and what tokens carry in "iss" */
   issuer: string;
+  /** Where THIS server reaches Keycloak; differs only inside Docker (http://keycloak:8080/realms/sentinel) */
+  internalIssuer: string;
   clientId: string;
   clientSecret: string;
 }
@@ -77,7 +80,7 @@ export async function refreshSession(
   fetchImpl: typeof fetch = fetch,
 ): Promise<SessionToken | null> {
   if (!token.refreshToken) return null;
-  const res = await fetchImpl(`${cfg.issuer}/protocol/openid-connect/token`, {
+  const res = await fetchImpl(`${cfg.internalIssuer}/protocol/openid-connect/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -99,7 +102,7 @@ export function keycloakConfig(): KeycloakConfig {
   if (!issuer || !clientId || !clientSecret) {
     throw new Error("KEYCLOAK_ISSUER, KEYCLOAK_CLIENT_ID and KEYCLOAK_CLIENT_SECRET must be set (see .env.example)");
   }
-  return { issuer, clientId, clientSecret };
+  return { issuer, internalIssuer: process.env.KEYCLOAK_INTERNAL_ISSUER || issuer, clientId, clientSecret };
 }
 
 /** next-auth's session cookie name; the __Secure- prefix only applies when the app runs on https. */

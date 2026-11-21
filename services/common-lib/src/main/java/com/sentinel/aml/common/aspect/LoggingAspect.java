@@ -13,6 +13,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.util.Arrays;
+import java.util.regex.Pattern;
 import java.util.UUID;
 
 @Aspect
@@ -22,6 +23,17 @@ public class LoggingAspect {
 
     private static final String TRACE_ID = "traceId";
     private static final String TRACE_HEADER = "X-Trace-Id";
+
+    /**
+     * PII and secrets never reach the logs (Phase 7b; ADR-002 flagged the raw national ID on registration).
+     * Matches record/bean toString output ("idNumber=PAN-ABCD1234E") and JSON ("\"idNumber\":\"...\"").
+     */
+    private static final Pattern SENSITIVE = Pattern.compile(
+            "(?i)(\"?\\b(?:idNumber|nationalId|password|secret|clientSecret|token|accessToken|refreshToken|authorization)\"?\\s*[=:]\\s*\"?)([^,\"\\])}]*)");
+
+    static String redact(String text) {
+        return text == null ? null : SENSITIVE.matcher(text).replaceAll("$1***");
+    }
 
     @Pointcut("within(@org.springframework.web.bind.annotation.RestController *)")
     public void controllerPointcut() {}
@@ -47,7 +59,7 @@ public class LoggingAspect {
         Object[] args = joinPoint.getArgs();
 
         log.info("▶ [REQ] [{}] {} {} | Executing: {}.{}() | Payload: {}",
-                traceId, httpMethod, uri, className, methodName, Arrays.toString(args));
+                traceId, httpMethod, uri, className, methodName, redact(Arrays.toString(args)));
 
         long startTime = System.currentTimeMillis();
         try {

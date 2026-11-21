@@ -1,4 +1,4 @@
-import type { AlertStatus } from "./api";
+import type { AlertStatus, CaseStatus, Priority } from "./api";
 
 const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
 const dateTime = new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" });
@@ -76,4 +76,32 @@ export function formatThreshold(code: string, value: number | null | undefined):
     case "multiplier": return `${value}× average`;
     default: return value === 0 ? "any amount" : formatInr(value);
   }
+}
+
+export const CASE_STATUS_LABEL: Record<CaseStatus, string> = {
+  OPEN: "Open",
+  INVESTIGATING: "Investigating",
+  CLOSED_NO_ACTION: "Closed · no action",
+  CLOSED_REPORTED: "Closed · reported",
+};
+
+export const PRIORITY_LABEL: Record<Priority, string> = { HIGH: "High", MEDIUM: "Medium", LOW: "Low" };
+
+/** "CUSTOMER_RISK_CHANGED" -> "Customer risk changed" */
+export function actionLabel(action: string): string {
+  const s = action.toLowerCase().replaceAll("_", " ").replace("pii", "PII").replace("dlq", "DLQ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** Relative time for recent events ("4 min ago"), absolute date beyond a week. */
+export function timeAgo(value: string | null | undefined, now = Date.now()): string {
+  if (!value) return "—";
+  const t = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`).getTime();
+  if (Number.isNaN(t)) return value;
+  const s = Math.round((now - t) / 1000);
+  if (s < 45) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  if (s < 7 * 86400) return `${Math.round(s / 86400)} d ago`;
+  return formatDateTime(value);
 }

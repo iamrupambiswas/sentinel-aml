@@ -16,7 +16,15 @@ export async function middleware(req: NextRequest) {
   const secret = process.env.NEXTAUTH_SECRET!;
   const name = sessionCookieName();
   const raw = readSessionCookie(req.cookies.getAll(), name);
-  const token = raw ? ((await decode({ token: raw, secret })) as unknown as SessionToken | null) : null;
+  let token: SessionToken | null = null;
+  try {
+    token = raw ? ((await decode({ token: raw, secret })) as unknown as SessionToken | null) : null;
+  } catch {
+    // A cookie this server can't decrypt (secret rotated, or from another setup): drop it and sign in again
+    const res = unauthenticated(req);
+    clearSession(req, res, name);
+    return res;
+  }
 
   if (!token?.accessToken) return unauthenticated(req);
   if (!needsRefresh(token)) return NextResponse.next();
