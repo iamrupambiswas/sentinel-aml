@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Fragment } from "react";
 import { Icon } from "./Icon";
-import { LiveAlerts } from "./LiveAlerts";
+import { LiveStatus } from "./LiveAlerts";
 
 const SECTION: Record<string, string> = {
   alerts: "Alerts",
@@ -41,7 +41,7 @@ export function Topbar() {
         ))}
       </nav>
       <div className="ml-auto flex items-center gap-3">
-        <LiveAlerts />
+        <LiveStatus />
       </div>
     </header>
   );

@@ -1,28 +1,29 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { api, errorMessage, type AlertDetail } from "@/lib/api";
+import { notFound } from "next/navigation";
+import { ApiError, api, errorMessage, type AlertDetail } from "@/lib/api";
 import { STATUS_LABEL, formatDateTime, ruleLabel } from "@/lib/format";
 import { Icon } from "@/components/Icon";
-import { BackLink, ErrorPanel, Flash, KeyValue, PageHeader, RiskScore, StatusBadge } from "@/components/ui";
+import { SubmitButton } from "@/components/SubmitButton";
+
+import { BackLink, ErrorPanel, KeyValue, PageHeader, RiskScore, StatusBadge } from "@/components/ui";
 import { addToCase, changeStatus, openCase } from "./actions";
 
 export const metadata: Metadata = { title: "Alert" };
 
 export default async function AlertDetailPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ msg?: string; err?: string }>;
 }) {
   const { id } = await params;
-  const { msg, err } = await searchParams;
 
   let detail: AlertDetail | null = null;
   let error: string | null = null;
   try {
     detail = await api<AlertDetail>(`/api/v1/alerts/${encodeURIComponent(id)}`);
   } catch (e) {
+    if (e instanceof ApiError && (e.status === 404 || e.status === 400)) notFound(); // unknown or malformed ID
     error = errorMessage(e);
   }
 
@@ -56,7 +57,6 @@ export default async function AlertDetailPage({
           </>
         }
       />
-      <Flash msg={msg} err={err} />
 
       <div className="grid gap-5 xl:grid-cols-[1fr_340px]">
         <div className="min-w-0 space-y-5">
@@ -138,14 +138,13 @@ export default async function AlertDetailPage({
                 </div>
                 <div className="flex flex-col gap-2">
                   {detail.allowedNextStatuses.map((s) => (
-                    <button
+                    <SubmitButton
                       key={s}
-                      type="submit"
                       formAction={changeStatus.bind(null, s)}
                       className={`btn justify-start ${s === "UNDER_REVIEW" ? "btn-primary" : s === "ESCALATED" || s === "CLOSED_CONFIRMED" ? "btn-danger" : ""}`}
                     >
                       Move to {STATUS_LABEL[s]}
-                    </button>
+                    </SubmitButton>
                   ))}
                 </div>
               </form>
@@ -174,17 +173,16 @@ export default async function AlertDetailPage({
                     className="input"
                     defaultValue={`${ruleLabel(a.ruleCode)} on ${a.accountId}`}
                   />
-                  <button className="btn w-full" type="submit">
-                    <Icon name="plus" size={14} />
+                  <SubmitButton className="btn w-full" icon={<Icon name="plus" size={14} />}>
                     Open case
-                  </button>
+                  </SubmitButton>
                 </form>
                 <form action={addToCase} className="space-y-2 border-t border-line pt-4">
                   <input type="hidden" name="alertId" value={a.id} />
                   <label className="label" htmlFor="case-number">Or add to an existing case</label>
                   <div className="flex gap-2">
                     <input id="case-number" name="caseNumber" required placeholder="CASE-000001" className="input font-mono" />
-                    <button className="btn" type="submit">Add</button>
+                    <SubmitButton>Add</SubmitButton>
                   </div>
                 </form>
               </div>

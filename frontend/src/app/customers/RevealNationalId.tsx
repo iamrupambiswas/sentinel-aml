@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useState } from "react";
 import { Icon } from "@/components/Icon";
+import { Spinner } from "@/components/SubmitButton";
 import { revealNationalId, type RevealState } from "./actions";
 
 /** Shows the masked value; a senior can reveal the full one with a reason. It hides itself again after 60 s. */
@@ -43,7 +44,10 @@ export function RevealNationalId({ customerId, masked, canReveal }: { customerId
           <input id="reveal-reason" name="reason" required maxLength={300} className="input" placeholder="e.g. KYC refresh for CASE-000012" />
           <p className="text-[12px] text-muted">Your name, the time and this reason are written to the audit trail.</p>
           <div className="flex gap-2">
-            <button className="btn btn-primary" disabled={pending}>{pending ? "Revealing…" : "Reveal"}</button>
+            <button className="btn btn-primary" disabled={pending} aria-busy={pending || undefined}>
+              {pending && <Spinner />}
+              {pending ? "Revealing…" : "Reveal"}
+            </button>
             <button type="button" className="btn btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
           </div>
         </form>

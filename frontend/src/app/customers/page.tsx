@@ -5,7 +5,8 @@ import { formatDateTime } from "@/lib/format";
 import { getSession } from "@/lib/session";
 import { hasRole } from "@/lib/tokens";
 import { Icon } from "@/components/Icon";
-import { EmptyState, ErrorPanel, Flash, KeyValue, PageHeader, RatingBadge } from "@/components/ui";
+import { SubmitButton } from "@/components/SubmitButton";
+import { EmptyState, ErrorPanel, KeyValue, PageHeader, RatingBadge } from "@/components/ui";
 import { changeRating } from "./actions";
 import { RevealNationalId } from "./RevealNationalId";
 
@@ -13,7 +14,7 @@ export const metadata: Metadata = { title: "Customers" };
 
 const RATINGS: RiskRating[] = ["LOW", "MEDIUM", "HIGH"];
 
-type Search = { q?: string; id?: string; account?: string; msg?: string; err?: string };
+type Search = { q?: string; id?: string; account?: string };
 
 /** Accepts a customer ID or an account ID. Accounts that only appear in transactions are not registered. */
 async function lookup(sp: Search): Promise<{ data: CustomerWithAccounts | null; note: string | null }> {
@@ -37,12 +38,11 @@ async function lookup(sp: Search): Promise<{ data: CustomerWithAccounts | null; 
   }
 }
 
-function RatingForm({ target, id, customerId, current }: { target: "customer" | "account"; id: string; customerId: string; current: RiskRating }) {
+function RatingForm({ target, id, current }: { target: "customer" | "account"; id: string; current: RiskRating }) {
   return (
     <form action={changeRating} className="flex flex-wrap items-end gap-2">
       <input type="hidden" name="target" value={target} />
       <input type="hidden" name="id" value={id} />
-      <input type="hidden" name="customerId" value={customerId} />
       <div>
         <label className="label" htmlFor={`r-${id}`}>Rating</label>
         <select id={`r-${id}`} name="riskRating" defaultValue={current} className="input h-8 w-28">
@@ -53,7 +53,7 @@ function RatingForm({ target, id, customerId, current }: { target: "customer" | 
         <label className="label" htmlFor={`why-${id}`}>Reason</label>
         <input id={`why-${id}`} name="reason" required maxLength={500} className="input h-8" placeholder="Recorded in the audit trail" />
       </div>
-      <button className="btn h-8">Update</button>
+      <SubmitButton className="btn h-8">Update</SubmitButton>
     </form>
   );
 }
@@ -71,7 +71,6 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
         title="Customers"
         description="Look up who is behind an account: risk ratings, accounts, and, for senior analysts, the full national ID with an audited reason."
       />
-      <Flash msg={sp.msg} err={sp.err} />
 
       <form role="search" className="card mb-5 flex flex-wrap items-end gap-3 p-4">
         <div className="min-w-64 flex-1">
@@ -111,7 +110,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
             {isSenior && (
               <div className="border-t border-line pt-4">
                 <div className="eyebrow mb-2">Customer risk rating</div>
-                <RatingForm target="customer" id={data.customer.id} customerId={data.customer.id} current={data.customer.riskRating} />
+                <RatingForm target="customer" id={data.customer.id} current={data.customer.riskRating} />
               </div>
             )}
           </section>
@@ -138,7 +137,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                     </div>
                     {isSenior && (
                       <div className="mt-3">
-                        <RatingForm target="account" id={a.id} customerId={data.customer.id} current={a.accountRiskRating} />
+                        <RatingForm target="account" id={a.id} current={a.accountRiskRating} />
                       </div>
                     )}
                   </li>

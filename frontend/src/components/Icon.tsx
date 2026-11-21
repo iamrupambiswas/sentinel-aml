@@ -26,6 +26,9 @@ const PATHS = {
   lock: "M5 9h10v8H5zM7 9V6.5a3 3 0 0 1 6 0V9",
   link: "M8.5 11.5a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 0 0-5-5L10 5M11.5 8.5a3.5 3.5 0 0 0-5 0L4 11a3.5 3.5 0 0 0 5 5l1-1",
   activity: "M2 10h3.5l2-5 3.5 10 2-5H18",
+  refresh: "M16.5 10a6.5 6.5 0 1 1-1.9-4.6M16.5 3v3.5H13",
+  home: "M3 9.5 10 3.5l7 6M5 8v8.5h10V8M8.5 16.5v-4h3v4",
+  back: "M8 5 3 10l5 5M3.5 10H17",
 } as const;
 
 export type IconName = keyof typeof PATHS;
@@ -49,7 +52,7 @@ export function Icon({ name, size = 16, ...props }: { name: IconName; size?: num
   );
 }
 
-/** The Sentinel mark: a watch tower's beam over a baseline. */
+/** The Sentinel mark (brand/svg/sentinel-mark.svg). */
 export function Logo({ size = 22 }: { size?: number }) {
   return (
     // Same mark as brand/svg/sentinel-mark.svg: shield + an "S" drawn as a transaction flow, middle node flagged

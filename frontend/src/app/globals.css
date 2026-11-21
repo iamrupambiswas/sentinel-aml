@@ -36,7 +36,6 @@
   --shadow-pop: 0 12px 32px -8px rgb(16 24 32 / 0.22), 0 2px 6px rgb(16 24 32 / 0.08);
 
   --animate-rise: rise 0.32s cubic-bezier(0.2, 0.7, 0.2, 1) both;
-  --animate-slide-in: slide-in 0.28s cubic-bezier(0.2, 0.7, 0.2, 1) both;
   --animate-shimmer: shimmer 1.4s ease-in-out infinite;
   --animate-ping-slow: ping-slow 2.2s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
@@ -168,10 +167,6 @@ body {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }
 }
-@keyframes slide-in {
-  from { opacity: 0; transform: translateX(16px); }
-  to { opacity: 1; transform: none; }
-}
 @keyframes shimmer {
   0% { background-position: -400px 0; }
   100% { background-position: 400px 0; }
@@ -191,11 +186,70 @@ body {
 .page > *:nth-child(4) { animation-delay: 120ms; }
 .page > *:nth-child(n + 5) { animation-delay: 160ms; }
 
+/* Notices: drop in from the top on desktop, rise from the bottom on phones; slide out to the right */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-10px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes toast-in-up {
+  from { opacity: 0; transform: translateY(14px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes toast-out {
+  to { opacity: 0; transform: translateX(28px) scale(0.97); }
+}
+@keyframes countdown {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+.toast-enter { animation: toast-in 0.34s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.toast-leave { animation: toast-out 0.22s cubic-bezier(0.4, 0, 1, 1) forwards; }
+@media (max-width: 639px) {
+  .toast-enter { animation-name: toast-in-up; }
+}
+/* The countdown is the toast's timer: hover or keyboard focus pauses it */
+.toast-timer {
+  transform-origin: left;
+  opacity: 0.75;
+  animation: countdown var(--toast-ms, 6s) linear forwards;
+}
+.toast:hover .toast-timer,
+.toast:focus-within .toast-timer {
+  animation-play-state: paused;
+}
+
+/* Spinner */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spin { animation: spin 0.7s linear infinite; }
+
+/* Skeletons fade in after a beat, so fast pages never flash a placeholder */
+.loading-in { animation: rise 0.3s ease-out 120ms both; }
+
+/* Error pages: a slow sweep across the illustration, and a gentle float */
+@keyframes sweep {
+  0% { transform: translateX(-100%); opacity: 0; }
+  15%, 85% { opacity: 1; }
+  100% { transform: translateX(500%); opacity: 0; }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+.sweep { animation: sweep 4.5s ease-in-out infinite; }
+.float { animation: float 5s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+  /* still a timer, just not a moving one */
+  .toast-timer {
+    animation-duration: var(--toast-ms, 6s) !important;
+    visibility: hidden;
   }
 }
 

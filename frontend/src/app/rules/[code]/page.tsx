@@ -3,20 +3,18 @@ import { api, errorMessage, type RuleVersionView, type RuleView } from "@/lib/ap
 import { formatDateTime, formatThreshold, formatWindow, thresholdLabel } from "@/lib/format";
 import { getSession } from "@/lib/session";
 import { hasRole } from "@/lib/tokens";
-import { BackLink, ErrorPanel, Flash, KeyValue, PageHeader } from "@/components/ui";
+import { SubmitButton } from "@/components/SubmitButton";
+import { BackLink, ErrorPanel, KeyValue, PageHeader } from "@/components/ui";
 import { updateRule } from "../actions";
 
 export const metadata: Metadata = { title: "Rule" };
 
 export default async function RulePage({
   params,
-  searchParams,
 }: {
   params: Promise<{ code: string }>;
-  searchParams: Promise<{ msg?: string; err?: string }>;
 }) {
   const { code } = await params;
-  const { msg, err } = await searchParams;
   const isAdmin = hasRole(await getSession(), "ADMIN");
 
   let rule: RuleView | null = null;
@@ -54,7 +52,6 @@ export default async function RulePage({
           </span>
         }
       />
-      <Flash msg={msg} err={err} />
 
       <div className="grid gap-5 xl:grid-cols-[360px_1fr]">
         {isAdmin ? (
@@ -88,7 +85,7 @@ export default async function RulePage({
               <label className="label" htmlFor="reason">Reason</label>
               <textarea id="reason" name="reason" required maxLength={500} rows={2} className="input" placeholder="e.g. Raise CTR to ₹10 lakh per circular 2026/11" />
             </div>
-            <button className="btn btn-primary w-full" type="submit">Save as version {rule.version + 1}</button>
+            <SubmitButton className="btn btn-primary w-full">Save as version {rule.version + 1}</SubmitButton>
             <p className="text-[12px] leading-relaxed text-muted">
               Saved under your username in the version history and the audit trail. If someone else saved first, you’ll be asked to reload.
             </p>

@@ -2,11 +2,13 @@
 
 > **New here? Start with [GETTING-STARTED.md](GETTING-STARTED.md)**: the short, step-by-step way to run everything and take a tour. This guide is the detailed reference: what to check in each folder, SQL, Redis and broker queries.
 
-Everything here is done by hand: Docker Compose, one terminal per service, Postman for the API, and Adminer, `mysql`, `redis-cli`, the Artemis console and the service logs to see what happened inside.
+Everything here is done by hand: the infrastructure in Docker Compose, one terminal per service, Postman for the API, and Adminer, `mysql`, `redis-cli`, the Artemis console and the service logs to see what happened inside.
+
+> **Just want it running?** `docker compose up -d --build` starts the infrastructure, all five services and the console in containers, replacing sections 1–3 ([GETTING-STARTED.md](GETTING-STARTED.md)). Every check from section 4 on works the same against the containers: same ports, same databases. Service logs: `docker compose logs -f <service>`.
 
 ```mermaid
 flowchart LR
-    S1["1. docker compose up"] --> S2["2. mvn install"] --> S3["3. start 5 services<br/>(5 terminals)"] --> S4["4. health checks"] --> S5["5. Postman<br/>folders 00 → 08"] --> S6["6. verify in<br/>MySQL · Redis · Artemis · logs"]
+    S1["1. docker compose up<br/>(infrastructure)"] --> S2["2. mvn install"] --> S3["3. start 5 services<br/>(5 terminals)"] --> S4["4. health checks"] --> S5["5. Postman<br/>folders 00 → 08"] --> S6["6. verify in<br/>MySQL · Redis · Artemis · logs"]
 ```
 
 ---
@@ -25,16 +27,16 @@ flowchart LR
 
 ## 1. Start the infrastructure
 
-From the repository root:
+From the repository root, start **only the infrastructure** (a plain `docker compose up` would also start the services in containers, on the same ports you're about to use):
 
 ```bash
-docker compose up -d
+docker compose up -d mysql redis activemq keycloak adminer redisinsight
 ```
 ```bash
 docker compose ps
 ```
 
-Wait until **mysql**, **redis** and **activemq** show `(healthy)` (≈ 20–40 s on first start; the first run also downloads the RedisInsight image). Keycloak, Adminer and RedisInsight have no healthcheck.
+Wait until **mysql**, **redis**, **activemq** and **keycloak** show `(healthy)` (≈ 30–60 s on first start; the first run also downloads the images). Adminer and RedisInsight have no healthcheck.
 
 | Container | Web UI | Login |
 |---|---|---|

@@ -5,7 +5,8 @@ import { formatDateTime } from "@/lib/format";
 import { getSession } from "@/lib/session";
 import { hasRole } from "@/lib/tokens";
 import { Icon } from "@/components/Icon";
-import { EmptyState, ErrorPanel, Flash, PageHeader } from "@/components/ui";
+import { SubmitButton } from "@/components/SubmitButton";
+import { EmptyState, ErrorPanel, PageHeader } from "@/components/ui";
 import { remove, replay } from "./actions";
 
 export const metadata: Metadata = { title: "Dead letters" };
@@ -16,10 +17,10 @@ const QUEUE_ROLE: Record<string, string> = {
   "sentinel.audit.events": "Audit events waiting to be chained",
 };
 
-export default async function OpsPage({ searchParams }: { searchParams: Promise<{ queue?: string; msg?: string; err?: string }> }) {
-  const { queue, msg, err } = await searchParams;
+export default async function OpsPage({ searchParams }: { searchParams: Promise<{ queue?: string }> }) {
+  const { queue } = await searchParams;
   if (!hasRole(await getSession(), "ADMIN")) {
-    return <ErrorPanel message="Dead-letter operations need the ADMIN role." />;
+    return <ErrorPanel message="Dead-letter operations need the ADMIN role." retry={false} />;
   }
 
   let queues: DeadLetterQueueInfo[] = [];
@@ -42,7 +43,6 @@ export default async function OpsPage({ searchParams }: { searchParams: Promise<
         title="Dead letters"
         description="Messages that failed five delivery attempts (1 s, 2 s, 4 s, 8 s backoff) are parked here so the queue keeps flowing. Fix the cause, then replay. Delete only what can never be processed."
       />
-      <Flash msg={msg} err={err} />
       {error && <ErrorPanel message={error} />}
 
       <div className="mb-5 grid gap-4 md:grid-cols-3">
@@ -72,7 +72,7 @@ export default async function OpsPage({ searchParams }: { searchParams: Promise<
             {letters.length > 0 && (
               <form action={replay}>
                 <input type="hidden" name="queue" value={selected} />
-                <button className="btn btn-primary h-7" type="submit">Replay all {letters.length}</button>
+                <SubmitButton className="btn btn-primary h-7">Replay all {letters.length}</SubmitButton>
               </form>
             )}
           </div>
@@ -90,15 +90,14 @@ export default async function OpsPage({ searchParams }: { searchParams: Promise<
                       <form action={replay}>
                         <input type="hidden" name="queue" value={selected} />
                         <input type="hidden" name="messageId" value={l.messageId} />
-                        <button className="btn h-7" type="submit">
-                          <Icon name="activity" size={13} />
+                        <SubmitButton className="btn h-7" icon={<Icon name="refresh" size={13} />}>
                           Replay
-                        </button>
+                        </SubmitButton>
                       </form>
                       <form action={remove}>
                         <input type="hidden" name="queue" value={selected} />
                         <input type="hidden" name="messageId" value={l.messageId} />
-                        <button className="btn btn-danger h-7" type="submit">Delete</button>
+                        <SubmitButton className="btn btn-danger h-7">Delete</SubmitButton>
                       </form>
                     </div>
                   </div>

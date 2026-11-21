@@ -5,7 +5,11 @@ import { cookies } from "next/headers";
 import "./globals.css";
 import { Sidebar } from "@/components/Sidebar";
 import { Topbar } from "@/components/Topbar";
-import type { ThemeChoice } from "@/components/ThemeToggle";
+import { LiveFeed } from "@/components/LiveAlerts";
+import { FlashToasts, Toaster } from "@/components/Toaster";
+import { StoreProvider } from "@/store/StoreProvider";
+import type { ThemeChoice } from "@/store/uiSlice";
+import { FLASH_COOKIE, decodeFlash } from "@/lib/flash";
 import { getSession, keycloakLogoutUrl } from "@/lib/session";
 import { hasRole } from "@/lib/tokens";
 
@@ -26,28 +30,31 @@ function roleLabel(roles: string[]): string {
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const session = await getSession(); // null on /login; every other page is behind middleware
-  const themeCookie = (await cookies()).get("sentinel-theme")?.value;
+  const jar = await cookies();
+  const themeCookie = jar.get("sentinel-theme")?.value;
   const theme: ThemeChoice = themeCookie === "light" || themeCookie === "dark" ? themeCookie : "system";
 
   return (
     <html lang="en" data-theme={theme === "system" ? undefined : theme} className={`${plexSans.variable} ${plexMono.variable}`}>
       <body className="min-h-screen font-sans text-[14px]">
         {session ? (
-          <>
+          <StoreProvider theme={theme}>
+            <LiveFeed />
+            <Toaster />
+            <FlashToasts flash={decodeFlash(jar.get(FLASH_COOKIE)?.value)} />
             <Sidebar
               username={session.username}
               roleLabel={roleLabel(session.roles)}
               isSenior={hasRole(session, "SENIOR_ANALYST")}
               isAdmin={hasRole(session, "ADMIN")}
               logoutUrl={keycloakLogoutUrl()}
-              theme={theme}
               apiDocsUrl={`${process.env.GATEWAY_PUBLIC_URL ?? "http://localhost:8080"}/swagger-ui.html`}
             />
             <div className="canvas-grid min-h-screen lg:pl-64">
               <Topbar />
               <main className="page mx-auto max-w-[1280px] px-4 py-6 sm:px-8 sm:py-8">{children}</main>
             </div>
-          </>
+          </StoreProvider>
         ) : (
           children
         )}

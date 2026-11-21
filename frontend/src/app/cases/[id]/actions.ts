@@ -1,12 +1,9 @@
 "use server";
 
-import { redirect } from "next/navigation";
+import { flashResult } from "@/lib/flash-server";
 import { api, errorMessage, type CaseStatus, type Priority } from "@/lib/api";
 import { CASE_STATUS_LABEL } from "@/lib/format";
 import { getSession } from "@/lib/session";
-
-const back = (id: string, err: string | null, msg: string) =>
-  `/cases/${id}?${err ? `err=${encodeURIComponent(err)}` : `msg=${encodeURIComponent(msg)}`}`;
 
 async function patch(id: string, body: Record<string, unknown>): Promise<string | null> {
   try {
@@ -22,14 +19,14 @@ export async function changeCaseStatus(status: CaseStatus, formData: FormData) {
   const id = String(formData.get("id"));
   const resolution = String(formData.get("resolution") ?? "").trim();
   const err = await patch(id, { status, resolution: resolution || null, expectedVersion: Number(formData.get("expectedVersion")) });
-  redirect(back(id, err, `Moved to ${CASE_STATUS_LABEL[status]}.`));
+  await flashResult(err, `Moved to ${CASE_STATUS_LABEL[status]}.`);
 }
 
 export async function assignToMe(formData: FormData) {
   const id = String(formData.get("id"));
   const me = (await getSession())?.username ?? "";
   const err = await patch(id, { assignee: me, expectedVersion: Number(formData.get("expectedVersion")) });
-  redirect(back(id, err, "Assigned to you."));
+  await flashResult(err, "Assigned to you.");
 }
 
 export async function updateOwnerAndPriority(formData: FormData) {
@@ -40,7 +37,7 @@ export async function updateOwnerAndPriority(formData: FormData) {
   if (assignee !== String(formData.get("currentAssignee") ?? "")) body.assignee = assignee; // "" unassigns
   if (priority !== formData.get("currentPriority")) body.priority = priority;
   const err = Object.keys(body).length === 1 ? "Nothing changed." : await patch(id, body);
-  redirect(back(id, err, "Case updated."));
+  await flashResult(err, "Case updated.");
 }
 
 export async function addNote(formData: FormData) {
@@ -54,7 +51,7 @@ export async function addNote(formData: FormData) {
       err = errorMessage(e);
     }
   }
-  redirect(back(id, err, "Note added."));
+  await flashResult(err, "Note added.");
 }
 
 export async function addAlert(formData: FormData) {
@@ -68,5 +65,5 @@ export async function addAlert(formData: FormData) {
       err = errorMessage(e);
     }
   }
-  redirect(back(id, err, "Alert added."));
+  await flashResult(err, "Alert added.");
 }

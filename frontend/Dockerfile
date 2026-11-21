@@ -1,5 +1,5 @@
 # Sentinel console: production image (Phase 7b). Build from the repository root with
-#   docker compose --profile console build console
+#   docker compose build console
 # or from this folder:  docker build -t sentinel-console .
 
 FROM node:22-alpine AS deps

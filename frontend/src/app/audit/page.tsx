@@ -5,14 +5,15 @@ import { actionLabel, formatDateTime } from "@/lib/format";
 import { getSession } from "@/lib/session";
 import { hasRole } from "@/lib/tokens";
 import { Icon } from "@/components/Icon";
-import { EmptyState, ErrorPanel, Flash, PageHeader, Pager } from "@/components/ui";
+import { SubmitButton } from "@/components/SubmitButton";
+import { EmptyState, ErrorPanel, PageHeader, Pager } from "@/components/ui";
 import { verifyChain } from "./actions";
 
 export const metadata: Metadata = { title: "Audit trail" };
 
 const ENTITY_TYPES = ["ALERT", "CASE", "CUSTOMER", "ACCOUNT", "RULE", "DEAD_LETTER"];
 
-type Search = { entityType?: string; entityId?: string; actor?: string; page?: string; msg?: string; err?: string };
+type Search = { entityType?: string; entityId?: string; actor?: string; page?: string };
 
 function entityLink(e: AuditEntry): string | null {
   switch (e.entityType) {
@@ -40,7 +41,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
   const sp = await searchParams;
   const session = await getSession();
   if (!hasRole(session, "SENIOR_ANALYST")) {
-    return <ErrorPanel message="The audit trail is available to senior analysts and administrators." />;
+    return <ErrorPanel message="The audit trail is available to senior analysts and administrators." retry={false} />;
   }
   const isAdmin = hasRole(session, "ADMIN");
   const page = Math.max(0, Number(sp.page ?? 0) || 0);
@@ -70,15 +71,11 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
         actions={
           isAdmin && (
             <form action={verifyChain}>
-              <button className="btn">
-                <Icon name="shield" size={14} />
-                Verify chain
-              </button>
+              <SubmitButton icon={<Icon name="shield" size={14} />}>Verify chain</SubmitButton>
             </form>
           )
         }
       />
-      <Flash msg={sp.msg} err={sp.err} />
 
       <form role="search" className="card mb-5 grid gap-3 p-4 sm:grid-cols-[1fr_1.4fr_1fr_auto]">
         <div>

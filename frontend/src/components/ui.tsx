@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import type { AlertStatus, CaseStatus, Priority, RiskRating } from "@/lib/api";
 import { CASE_STATUS_LABEL, PRIORITY_LABEL, STATUS_LABEL, severity } from "@/lib/format";
+import { RetryButton } from "./RetryButton";
 import { Icon, type IconName } from "./Icon";
 
 // ---------- badges ----------
@@ -128,30 +129,18 @@ export function BackLink({ href, children }: { href: string; children: ReactNode
   );
 }
 
-/** Success / error banner driven by ?msg= and ?err= after a server action redirects back. */
-export function Flash({ msg, err }: { msg?: string; err?: string }) {
-  if (!msg && !err) return null;
+/** A page's data couldn't be loaded (gateway down, 403, …). Inline, with a retry that re-runs the page's server fetch (off for permission messages, where retrying can't help). */
+export function ErrorPanel({ message, retry = true }: { message: string; retry?: boolean }) {
   return (
-    <div
-      role={err ? "alert" : "status"}
-      className={`mb-5 flex items-start gap-2.5 rounded-xl border px-4 py-3 text-[13px] animate-rise ${
-        err ? "border-danger/30 bg-danger-soft text-danger" : "border-ok/30 bg-ok-soft text-ok"
-      }`}
-    >
-      <Icon name={err ? "alert" : "check"} className="mt-0.5 shrink-0" />
-      <span>{err ?? msg}</span>
-    </div>
-  );
-}
-
-export function ErrorPanel({ message }: { message: string }) {
-  return (
-    <div role="alert" className="card flex items-start gap-3 border-danger/30 p-5 text-[13px]">
-      <Icon name="alert" className="mt-0.5 shrink-0 text-danger" />
-      <div>
+    <div role="alert" className="card mb-5 flex flex-wrap items-start gap-3 border-danger/30 p-5 text-[13px]">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-danger-soft text-danger">
+        <Icon name="alert" size={15} />
+      </span>
+      <div className="min-w-0 flex-1">
         <div className="font-medium text-ink">Couldn’t load this</div>
         <div className="mt-0.5 text-muted">{message}</div>
       </div>
+      {retry && <RetryButton />}
     </div>
   );
 }

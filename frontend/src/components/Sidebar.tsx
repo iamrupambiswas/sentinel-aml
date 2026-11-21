@@ -2,10 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { signOut } from "next-auth/react";
 import { Icon, Logo, type IconName } from "./Icon";
-import { ThemeToggle, type ThemeChoice } from "./ThemeToggle";
+import { useAppDispatch, useAppSelector } from "@/store/hooks";
+import { navClosed, navOpened, selectNavOpen } from "@/store/uiSlice";
+import { LiveStatus } from "./LiveAlerts";
+import { ThemeToggle } from "./ThemeToggle";
 
 interface NavItem {
   href: string;
@@ -20,14 +23,17 @@ interface Props {
   isSenior: boolean;
   isAdmin: boolean;
   logoutUrl: string;
-  theme: ThemeChoice;
   apiDocsUrl: string;
 }
 
-export function Sidebar({ username, roleLabel, isSenior, isAdmin, logoutUrl, theme, apiDocsUrl }: Props) {
+export function Sidebar({ username, roleLabel, isSenior, isAdmin, logoutUrl, apiDocsUrl }: Props) {
   const path = usePathname();
-  const [open, setOpen] = useState(false);
-  useEffect(() => setOpen(false), [path]); // close the mobile drawer after navigating
+  const open = useAppSelector(selectNavOpen);
+  const dispatch = useAppDispatch();
+  const setOpen = (o: boolean) => dispatch(o ? navOpened() : navClosed());
+  useEffect(() => {
+    dispatch(navClosed()); // close the mobile drawer after navigating
+  }, [path, dispatch]);
 
   const groups: { title: string; items: NavItem[] }[] = [
     {
@@ -66,6 +72,9 @@ export function Sidebar({ username, roleLabel, isSenior, isAdmin, logoutUrl, the
         </button>
         <Logo size={22} />
         <span className="text-sm font-semibold text-white">Sentinel</span>
+        <span className="ml-auto">
+          <LiveStatus />
+        </span>
       </div>
 
       {open && <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setOpen(false)} aria-hidden />}
@@ -133,7 +142,7 @@ export function Sidebar({ username, roleLabel, isSenior, isAdmin, logoutUrl, the
         </nav>
 
         <div className="space-y-3 border-t border-[var(--sidebar-line)] p-4">
-          <ThemeToggle initial={theme} />
+          <ThemeToggle />
           <div className="flex items-center gap-2.5">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--sidebar-active)] text-[11px] font-semibold text-white" aria-hidden>
               {initials}

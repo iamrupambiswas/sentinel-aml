@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { ALERT_STATUSES, api, errorMessage, type AlertStatus, type CaseDetail } from "@/lib/api";
+import { flashResult, setFlash } from "@/lib/flash-server";
 import { STATUS_LABEL } from "@/lib/format";
 
 /**
@@ -14,7 +15,7 @@ export async function changeStatus(status: AlertStatus, formData: FormData) {
   const id = String(formData.get("id"));
   const note = String(formData.get("note") ?? "").trim();
   const expectedVersion = Number(formData.get("expectedVersion"));
-  if (!ALERT_STATUSES.includes(status)) redirect(`/alerts/${id}?err=${encodeURIComponent("Unknown status")}`);
+  if (!ALERT_STATUSES.includes(status)) return setFlash("danger", "Unknown status");
 
   let err: string | null = null;
   try {
@@ -25,9 +26,8 @@ export async function changeStatus(status: AlertStatus, formData: FormData) {
   } catch (e) {
     err = errorMessage(e);
   }
-  // redirect() works by throwing, so it stays outside the try
-  const q = err ? `err=${encodeURIComponent(err)}` : `msg=${encodeURIComponent(`Moved to ${STATUS_LABEL[status]}.`)}`;
-  redirect(`/alerts/${id}?${q}`);
+  // stays on the page: setting the flash cookie re-renders it with the new status
+  await flashResult(err, `Moved to ${STATUS_LABEL[status]}.`);
 }
 
 /** Opens a new case containing this alert, then goes to the case. */
@@ -41,8 +41,9 @@ export async function openCase(formData: FormData) {
   } catch (e) {
     err = errorMessage(e);
   }
-  if (err || !created) redirect(`/alerts/${alertId}?err=${encodeURIComponent(err ?? "Could not open the case")}`);
-  redirect(`/cases/${created.summary.id}?msg=${encodeURIComponent(`${created.summary.caseNumber} opened.`)}`);
+  if (err || !created) return setFlash("danger", err ?? "Could not open the case");
+  await setFlash("success", `${created.summary.caseNumber} opened.`);
+  redirect(`/cases/${created.summary.id}`); // throws, so it stays outside any try
 }
 
 /** Adds this alert to an existing case, given as 42 or CASE-000042. */
@@ -50,13 +51,14 @@ export async function addToCase(formData: FormData) {
   const alertId = String(formData.get("alertId"));
   const raw = String(formData.get("caseNumber") ?? "").trim();
   const caseId = Number(raw.replace(/^CASE-0*/i, ""));
-  if (!Number.isInteger(caseId) || caseId <= 0) redirect(`/alerts/${alertId}?err=${encodeURIComponent("Enter a case number like CASE-000001 or 1")}`);
+  if (!Number.isInteger(caseId) || caseId <= 0) return setFlash("danger", "Enter a case number like CASE-000001 or 1");
   let err: string | null = null;
   try {
     await api(`/api/v1/cases/${caseId}/alerts`, { method: "POST", body: JSON.stringify({ alertId }) });
   } catch (e) {
     err = errorMessage(e);
   }
-  if (err) redirect(`/alerts/${alertId}?err=${encodeURIComponent(err)}`);
-  redirect(`/cases/${caseId}?msg=${encodeURIComponent("Alert added to the case.")}`);
+  if (err) return setFlash("danger", err);
+  await setFlash("success", "Alert added to the case.");
+  redirect(`/cases/${caseId}`);
 }

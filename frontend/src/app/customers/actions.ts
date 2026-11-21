@@ -1,7 +1,7 @@
 "use server";
 
-import { redirect } from "next/navigation";
 import { api, errorMessage, type RiskRating } from "@/lib/api";
+import { flashResult } from "@/lib/flash-server";
 
 export interface RevealState {
   idNumber?: string;
@@ -31,7 +31,6 @@ export async function revealNationalId(_prev: RevealState, formData: FormData): 
 export async function changeRating(formData: FormData) {
   const target = String(formData.get("target")); // "customer" | "account"
   const id = String(formData.get("id"));
-  const customerId = String(formData.get("customerId"));
   const riskRating = String(formData.get("riskRating")) as RiskRating;
   const reason = String(formData.get("reason") ?? "").trim();
   const path = target === "account" ? `/api/v1/accounts/${encodeURIComponent(id)}/risk-rating` : `/api/v1/customers/${encodeURIComponent(id)}/risk-rating`;
@@ -43,6 +42,5 @@ export async function changeRating(formData: FormData) {
       err = errorMessage(e);
     }
   }
-  const q = err ? `err=${encodeURIComponent(err)}` : `msg=${encodeURIComponent("Rating updated; detection uses it within seconds.")}`;
-  redirect(`/customers?id=${encodeURIComponent(customerId)}&${q}`);
+  await flashResult(err, "Rating updated; detection uses it within seconds.");
 }

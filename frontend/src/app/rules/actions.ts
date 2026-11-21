@@ -1,7 +1,7 @@
 "use server";
 
-import { redirect } from "next/navigation";
 import { api, errorMessage, type RuleView } from "@/lib/api";
+import { flashResult } from "@/lib/flash-server";
 
 function optionalNumber(v: FormDataEntryValue | null): number | undefined {
   const s = String(v ?? "").trim();
@@ -17,7 +17,7 @@ function optionalNumber(v: FormDataEntryValue | null): number | undefined {
  */
 export async function updateRule(formData: FormData) {
   const code = String(formData.get("ruleCode"));
-  const back = `/rules/${encodeURIComponent(code)}`;
+  const path = `/api/v1/rules/${encodeURIComponent(code)}`;
   const current = {
     thresholdAmount: optionalNumber(formData.get("currentThreshold")),
     windowMinutes: optionalNumber(formData.get("currentWindow")),
@@ -43,10 +43,10 @@ export async function updateRule(formData: FormData) {
   if (!body.reason) err = "Give a reason: it goes into the rule's audit history.";
   else {
     try {
-      saved = await api<RuleView>(back.replace("/rules/", "/api/v1/rules/"), { method: "PUT", body: JSON.stringify(body) });
+      saved = await api<RuleView>(path, { method: "PUT", body: JSON.stringify(body) });
     } catch (e) {
       err = errorMessage(e);
     }
   }
-  redirect(err ? `${back}?err=${encodeURIComponent(err)}` : `${back}?msg=${encodeURIComponent(`Saved as version ${saved?.version}. Live on every detection pod in seconds.`)}`);
+  await flashResult(err, `Saved as version ${saved?.version}. Live on every detection pod in seconds.`);
 }

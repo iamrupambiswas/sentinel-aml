@@ -1,5 +1,61 @@
+# Sentinel AML: the whole application in one command.
+#
+#   docker compose up -d --build        # first run builds 6 images (a few minutes); later runs reuse them
+#   docker compose ps                   # wait until every service says "healthy"
+#   open http://localhost:3000          # analyst console (analyst1 / senior1 / admin1, password = username)
+#
+# Infrastructure (MySQL, Redis, ActiveMQ Artemis, Keycloak), the five Java services, the console and two
+# optional GUIs. Only the gateway (8080), the console (3000) and the tools are meant to be opened; the service
+# and infrastructure ports are published for Postman, database tools and debugging.
+#
+# Running one service from your IDE instead: `docker compose stop <service>`, start it locally (its defaults
+# point at localhost, where the infrastructure ports are published), and if it sits behind the gateway, restart
+# the gateway with e.g. CUSTOMER_SERVICE_URL=http://host.docker.internal:8082.
+
+# ---------------------------------------------------------------- shared settings for the Java services
+x-java-service: &java-service
+  build:
+    context: ./services
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  networks:
+    - sentinel-network
+  depends_on: &java-deps
+    mysql:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    activemq:
+      condition: service_healthy
+    keycloak:
+      condition: service_healthy
+
+# Spring Boot reads environment variables over application.properties, so these replace the "localhost"
+# defaults the services use when run on the host.
+x-java-env: &java-env
+  SPRING_DATASOURCE_USERNAME: root
+  SPRING_DATASOURCE_PASSWORD: root
+  SPRING_DATA_REDIS_HOST: redis
+  SPRING_DATA_REDIS_PORT: "6379"
+  SPRING_ARTEMIS_BROKER_URL: tcp://activemq:61616
+  SPRING_ARTEMIS_USER: admin
+  SPRING_ARTEMIS_PASSWORD: adminpassword
+  # Tokens are issued for the browser-facing address (iss = http://localhost:8180/...), which a container
+  # can't reach. So: check the "iss" claim against the public issuer, but fetch the signing keys from
+  # Keycloak inside the network. With a JWK set URI, Spring never calls the issuer's discovery endpoint.
+  SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://localhost:8180/realms/sentinel
+  SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/sentinel/protocol/openid-connect/certs
+
+x-java-health: &java-health
+  interval: 10s
+  timeout: 5s
+  retries: 12
+  start_period: 60s
+
 services:
-  # 1. Relational Database (System of Record)
+  # ============================================================ infrastructure
+
+  # Relational database (system of record): one MySQL, a database per service (created on first start)
   mysql:
     image: mysql:8.0
     container_name: sentinel-mysql
@@ -11,14 +67,15 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql   # without a volume every container restart wipes all service DBs
     healthcheck:
-      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 12
+      start_period: 30s   # the very first start initialises the data directory
     networks:
       - sentinel-network
 
-  # 2. In-Memory Cache (Sliding Windows & Rate Limiting)
+  # In-memory cache (sliding windows, idempotency keys, rate limiting)
   redis:
     image: redis:7.0-alpine
     container_name: sentinel-redis
@@ -28,11 +85,11 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 6
     networks:
       - sentinel-network
 
-  # 3. Message Broker (Async Event Pipeline)
+  # Message broker (async event pipeline)
   activemq:
     image: apache/activemq-artemis:latest-alpine
     container_name: sentinel-activemq
@@ -43,47 +100,155 @@ services:
       # that dir as root, and on a fresh volume `artemis create` (non-root) can't write etc/login.config
       JAVA_ARGS_APPEND: -Dbroker.properties=/opt/sentinel/broker.properties
     ports:
-      - "61616:61616" # JMS Port
-      - "8161:8161"   # Web Console
+      - "61616:61616" # JMS
+      - "8161:8161"   # web console
     volumes:
       - artemis-data:/var/lib/artemis-instance   # persistent queues survive broker restarts (X2)
       # P21: redelivery backoff + per-queue dead-letter queues for every sentinel.* address
       - ./infra/artemis/broker.properties:/opt/sentinel/broker.properties:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8161/console"]
-      interval: 15s
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 12
+      start_period: 20s
     networks:
       - sentinel-network
 
-  # 4. Identity Provider (OAuth2 / JWTs)
+  # Identity provider (OAuth2 / OIDC, JWTs)
   keycloak:
     image: quay.io/keycloak/keycloak:24.0.1
     container_name: sentinel-keycloak
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
     # Imports the sentinel realm (roles, clients, test users) on first start; skipped if it already exists.
     # --hostname-url fixes the public address, so every token says iss=http://localhost:8180/realms/sentinel
-    # even when fetched from inside Docker (console container -> http://keycloak:8080). Back-channel URLs
-    # (token, JWKS) still follow the request, so containers can reach them.
+    # even when fetched from inside Docker (console -> http://keycloak:8080). Back-channel URLs (token, JWKS)
+    # still follow the request, so containers can reach them.
     command: start-dev --import-realm --hostname-url=http://localhost:8180 --hostname-strict-backchannel=false
     volumes:
       - ./infra/keycloak:/opt/keycloak/data/import:ro
     ports:
-      - "8180:8080"   # host 8180 -> Keycloak; host 8080 is reserved for the API gateway
+      - "8180:8080"   # host 8180 -> Keycloak; host 8080 is the API gateway
+    healthcheck:
+      # the image has no curl: ask /health/ready over bash's /dev/tcp
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"UP\"' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
     networks:
       - sentinel-network
 
-  # Analyst console (Phase 7b). Optional: only starts with the "console" profile:
-  #   docker compose --profile console up -d --build console
-  # The Java services run on your machine, so the container reaches the gateway through host.docker.internal.
+  # ============================================================ application
+
+  customer-service:
+    <<: *java-service
+    build:
+      context: ./services
+      args:
+        SERVICE: customer-service
+    image: sentinel-customer-service:local
+    container_name: sentinel-customer-service
+    environment:
+      <<: *java-env
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/customer_db?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    ports:
+      - "8082:8082"
+    healthcheck:
+      <<: *java-health
+      test: ["CMD", "curl", "-fsS", "http://localhost:8082/actuator/health"]
+
+  ingestion-service:
+    <<: *java-service
+    build:
+      context: ./services
+      args:
+        SERVICE: ingestion-service
+    image: sentinel-ingestion-service:local
+    container_name: sentinel-ingestion-service
+    environment:
+      <<: *java-env
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/ingestion_db?createDatabaseIfNotExist=true&allowPublicKeyRetrieval=true&useSSL=false&rewriteBatchedStatements=true
+    ports:
+      - "8083:8083"
+    healthcheck:
+      <<: *java-health
+      test: ["CMD", "curl", "-fsS", "http://localhost:8083/actuator/health"]
+
+  detection-service:
+    <<: *java-service
+    build:
+      context: ./services
+      args:
+        SERVICE: detection-service
+    image: sentinel-detection-service:local
+    container_name: sentinel-detection-service
+    environment:
+      <<: *java-env
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/sentinel_detection?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+    ports:
+      - "8084:8084"
+    healthcheck:
+      <<: *java-health
+      test: ["CMD", "curl", "-fsS", "http://localhost:8084/actuator/health"]
+
+  alert-case-service:
+    <<: *java-service
+    build:
+      context: ./services
+      args:
+        SERVICE: alert-case-service
+    image: sentinel-alert-case-service:local
+    container_name: sentinel-alert-case-service
+    environment:
+      <<: *java-env
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/alert_case_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&useAffectedRows=true
+    ports:
+      - "8085:8085"
+    healthcheck:
+      <<: *java-health
+      test: ["CMD", "curl", "-fsS", "http://localhost:8085/actuator/health"]
+
+  # Single entry point: JWT check, rate limits, body limits, routing, combined Swagger UI
+  gateway:
+    <<: *java-service
+    build:
+      context: ./services
+      args:
+        SERVICE: gateway-service
+    image: sentinel-gateway-service:local
+    container_name: sentinel-gateway
+    environment:
+      <<: *java-env
+      CUSTOMER_SERVICE_URL: http://customer-service:8082
+      INGESTION_SERVICE_URL: http://ingestion-service:8083
+      DETECTION_SERVICE_URL: http://detection-service:8084
+      ALERT_CASE_SERVICE_URL: http://alert-case-service:8085
+    ports:
+      - "8080:8080"
+    depends_on:
+      <<: *java-deps
+      customer-service:
+        condition: service_healthy
+      ingestion-service:
+        condition: service_healthy
+      detection-service:
+        condition: service_healthy
+      alert-case-service:
+        condition: service_healthy
+    healthcheck:
+      <<: *java-health
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
+
+  # Analyst console (Next.js). Talks to the gateway inside the network; the browser only sees :3000 and Keycloak.
   console:
-    profiles: ["console"]
     build: ./frontend
     image: sentinel-console:local
     container_name: sentinel-console
+    restart: unless-stopped
     environment:
       NEXTAUTH_URL: http://localhost:3000
       NEXTAUTH_SECRET: ${CONSOLE_NEXTAUTH_SECRET:-change-me-local-only-console-secret}
@@ -91,18 +256,21 @@ services:
       KEYCLOAK_INTERNAL_ISSUER: http://keycloak:8080/realms/sentinel # how the container reaches Keycloak
       KEYCLOAK_CLIENT_ID: sentinel-console
       KEYCLOAK_CLIENT_SECRET: sentinel-console-dev-secret
-      GATEWAY_URL: http://host.docker.internal:8080
+      GATEWAY_URL: http://gateway:8080
       GATEWAY_PUBLIC_URL: http://localhost:8080
-    extra_hosts:
-      - "host.docker.internal:host-gateway"   # needed on Linux; Docker Desktop already has it
     ports:
       - "3000:3000"
     depends_on:
-      - keycloak
+      keycloak:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
     networks:
       - sentinel-network
 
-  # 5. Database GUI (Optional, for easy schema inspection)
+  # ============================================================ optional tools
+
+  # Database GUI: http://localhost:8081 (server: mysql, user root, password root)
   adminer:
     image: adminer:latest
     container_name: sentinel-adminer
@@ -111,8 +279,7 @@ services:
     networks:
       - sentinel-network
 
-  # 6. Redis GUI (Optional, browse sliding windows, idempotency keys, baselines)
-  #    Open http://localhost:5540 -> "Add Redis database" -> host: redis, port: 6379
+  # Redis GUI: http://localhost:5540 -> "Add Redis database" -> host: redis, port: 6379
   redisinsight:
     image: redis/redisinsight:2.66
     container_name: sentinel-redisinsight

@@ -1,9 +1,7 @@
 "use server";
 
-import { redirect } from "next/navigation";
 import { api, errorMessage } from "@/lib/api";
-
-const back = (queue: string, q: string) => `/ops?queue=${encodeURIComponent(queue)}&${q}`;
+import { flashResult } from "@/lib/flash-server";
 
 /** Moves dead letters back to their source queue: one message, or all of them. ADMIN only (enforced by the API). */
 export async function replay(formData: FormData) {
@@ -17,7 +15,7 @@ export async function replay(formData: FormData) {
   } catch (e) {
     err = errorMessage(e);
   }
-  redirect(back(queue, err ? `err=${encodeURIComponent(err)}` : `msg=${encodeURIComponent(`Replayed ${replayed} message(s) to ${queue}.`)}`));
+  await flashResult(err, `Replayed ${replayed} message(s) to ${queue}.`);
 }
 
 /** Deletes one dead letter for good (after the cause is understood and the message is not needed). */
@@ -30,5 +28,5 @@ export async function remove(formData: FormData) {
   } catch (e) {
     err = errorMessage(e);
   }
-  redirect(back(queue, err ? `err=${encodeURIComponent(err)}` : `msg=${encodeURIComponent("Dead letter deleted.")}`));
+  await flashResult(err, "Dead letter deleted.");
 }

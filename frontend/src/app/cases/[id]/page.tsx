@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { api, errorMessage, type CaseDetail, type Priority } from "@/lib/api";
+import { notFound } from "next/navigation";
+import { ApiError, api, errorMessage, type CaseDetail, type Priority } from "@/lib/api";
 import { CASE_STATUS_LABEL, PRIORITY_LABEL, actionLabel, formatDateTime, ruleLabel, timeAgo } from "@/lib/format";
 import { getSession } from "@/lib/session";
 import { hasRole } from "@/lib/tokens";
 import { Icon } from "@/components/Icon";
-import { BackLink, CaseStatusBadge, EmptyState, ErrorPanel, Flash, KeyValue, PageHeader, PriorityBadge, RiskScore, StatusBadge } from "@/components/ui";
+import { SubmitButton } from "@/components/SubmitButton";
+
+import { BackLink, CaseStatusBadge, EmptyState, ErrorPanel, KeyValue, PageHeader, PriorityBadge, RiskScore, StatusBadge } from "@/components/ui";
 import { addAlert, addNote, assignToMe, changeCaseStatus, updateOwnerAndPriority } from "./actions";
 
 export const metadata: Metadata = { title: "Case" };
@@ -28,13 +31,10 @@ function describe(details: string): string {
 
 export default async function CasePage({
   params,
-  searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ msg?: string; err?: string }>;
 }) {
   const { id } = await params;
-  const { msg, err } = await searchParams;
   const session = await getSession();
   const isSenior = hasRole(session, "SENIOR_ANALYST");
 
@@ -43,6 +43,7 @@ export default async function CasePage({
   try {
     detail = await api<CaseDetail>(`/api/v1/cases/${encodeURIComponent(id)}`);
   } catch (e) {
+    if (e instanceof ApiError && (e.status === 404 || e.status === 400)) notFound(); // unknown or malformed ID
     error = errorMessage(e);
   }
   if (!detail) {
@@ -77,7 +78,6 @@ export default async function CasePage({
           </>
         }
       />
-      <Flash msg={msg} err={err} />
 
       <div className="grid gap-5 xl:grid-cols-[1fr_340px]">
         <div className="min-w-0 space-y-5">
@@ -114,10 +114,7 @@ export default async function CasePage({
                 <input type="hidden" name="id" value={c.id} />
                 <label className="sr-only" htmlFor="alertId">Alert ID to add</label>
                 <input id="alertId" name="alertId" placeholder="Paste an alert ID to add it" className="input font-mono" />
-                <button className="btn" type="submit">
-                  <Icon name="plus" size={14} />
-                  Add
-                </button>
+                <SubmitButton icon={<Icon name="plus" size={14} />}>Add</SubmitButton>
               </form>
             )}
           </section>
@@ -133,7 +130,7 @@ export default async function CasePage({
                 <label className="sr-only" htmlFor="body">New note</label>
                 <textarea id="body" name="body" rows={3} maxLength={5000} required className="input" placeholder="What you found, who you contacted, what is next" />
                 <div className="mt-2 flex justify-end">
-                  <button className="btn btn-primary" type="submit">Add note</button>
+                  <SubmitButton className="btn btn-primary">Add note</SubmitButton>
                 </div>
               </form>
             )}
@@ -174,19 +171,18 @@ export default async function CasePage({
                 <form action={assignToMe}>
                   <input type="hidden" name="id" value={c.id} />
                   <input type="hidden" name="expectedVersion" value={c.version} />
-                  <button className="btn w-full" type="submit">
-                    <Icon name="user" size={14} />
+                  <SubmitButton className="btn w-full" icon={<Icon name="user" size={14} />}>
                     Assign to me
-                  </button>
+                  </SubmitButton>
                 </form>
               )}
               {progress.map((s) => (
                 <form key={s}>
                   <input type="hidden" name="id" value={c.id} />
                   <input type="hidden" name="expectedVersion" value={c.version} />
-                  <button className="btn btn-primary w-full" formAction={changeCaseStatus.bind(null, s)}>
+                  <SubmitButton className="btn btn-primary w-full" formAction={changeCaseStatus.bind(null, s)}>
                     Start investigating
-                  </button>
+                  </SubmitButton>
                 </form>
               ))}
               <form action={updateOwnerAndPriority} className="space-y-3 border-t border-line pt-4">
@@ -204,7 +200,7 @@ export default async function CasePage({
                     {PRIORITIES.map((p) => <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>)}
                   </select>
                 </div>
-                <button className="btn w-full" type="submit">Save</button>
+                <SubmitButton className="btn w-full">Save</SubmitButton>
               </form>
               <form className="space-y-3 border-t border-line pt-4">
                 <input type="hidden" name="id" value={c.id} />
@@ -223,9 +219,9 @@ export default async function CasePage({
                 </div>
                 <div className="flex flex-col gap-2">
                   {closing.map((s) => (
-                    <button key={s} className={`btn ${s === "CLOSED_REPORTED" ? "btn-danger" : ""}`} formAction={changeCaseStatus.bind(null, s)} disabled={!isSenior}>
+                    <SubmitButton key={s} className={`btn ${s === "CLOSED_REPORTED" ? "btn-danger" : ""}`} formAction={changeCaseStatus.bind(null, s)} disabled={!isSenior}>
                       {s === "CLOSED_REPORTED" ? "Close · reported to FIU" : "Close · no action needed"}
-                    </button>
+                    </SubmitButton>
                   ))}
                 </div>
               </form>

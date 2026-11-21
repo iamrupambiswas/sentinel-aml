@@ -8,8 +8,10 @@ This document outlines the monorepo directory structure for the Sentinel AML pro
 sentinel-aml/
 ├── brand/                  # Logo kit: SVG, PNG, JPG, WebP, PDF, favicons and LinkedIn images (see brand/README.md)
 ├── docs/                   # Project documentation and architectural diagrams
+│   ├── console-user-guide.md       # How to use the analyst console (alerts vs cases, each page, roles)
+│   ├── frontend-technical-guide.md # How the console is built (auth, Redux state, SSE, recipes)
 │   └── ADR/                # Architecture Decision Records (e.g., ADR-001-microservices.md)
-├── services/               # Java 21 / Spring Boot 3 backend services
+├── services/               # Java 21 / Spring Boot 3 backend services; Dockerfile builds any of them (ARG SERVICE)
 │   ├── common-lib/         # Shared configurations, RFC 7807 error formats, and event DTOs
 │   ├── gateway-service/    # Spring Cloud Gateway (Single entry point, rate limiting, JWT validation)
 │   ├── customer-service/   # Manages customers, accounts, KYC, and PII masking
@@ -17,7 +19,7 @@ sentinel-aml/
 │   ├── detection-service/  # Core AML rule engine, risk scoring, and hot-reloading
 │   └── alert-case-service/ # Alert de-duplication, case management, and immutable hash-chained audit log
 ├── .github/workflows/      # CI: Java tests, console type check/tests/build, console Docker image (Phase 7b)
-├── frontend/               # Next.js 15 analyst console (Phase 7/7b): Keycloak login on the server, live alerts over SSE, Tailwind, Dockerfile
+├── frontend/               # Next.js 15 analyst console (Phase 7/7b): Keycloak login on the server, live alerts over SSE, Redux Toolkit for client state, Tailwind, Dockerfile
 ├── infra/                  # Infrastructure as Code (Terraform)
 │   ├── artemis/            # broker.properties: redelivery backoff + per-queue DLQs (mounted by docker-compose, Phase 5)
 │   ├── keycloak/           # sentinel-realm.json: roles, clients, test users (imported by docker-compose, Phase 6)
@@ -26,7 +28,7 @@ sentinel-aml/
 │       └── dev/            # Environment-specific state and variables for development
 ├── deploy/                 # Kubernetes manifests and Helm charts for CI/CD deployment
 ├── load-tests/             # JMeter test plans and synthetic CSV seed data for performance benchmarking
-├── docker-compose.yml      # Local orchestration for MySQL, Redis, ActiveMQ, Keycloak, etc.
+├── docker-compose.yml      # The whole application in one `docker compose up`: infrastructure, 5 services, gateway, console
 ├── .env.example            # Template for 12-factor environment variables (No secrets in Git)
 ├── .gitignore              # Standard Git ignore rules for Java, Node, Terraform, etc.
 └── README.md               # Project front page detailing business problem, architecture, and setup

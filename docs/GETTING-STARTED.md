@@ -1,8 +1,8 @@
 # Getting started: run Sentinel AML on your machine
 
-This guide takes you from a fresh clone to a working system you can click through: the infrastructure in Docker, five Java services, and the analyst console in your browser. Follow the steps in order. Every command is meant to be copied as-is.
+This guide takes you from a fresh clone to a working system you can click through. **One command starts everything** (databases, broker, login server, the five Java services and the analyst console) in Docker. If you want to change the code, [Developing locally](#developing-locally) shows how to run parts of it from your machine instead.
 
-**Time needed:** about 15 minutes the first time (downloads), 2 minutes after that.
+**Time needed:** about 10 minutes the first time (image downloads and builds), under a minute after that.
 
 > Already ran an older phase on this machine? Read [Upgrading from an earlier phase](#upgrading-from-an-earlier-phase) first.
 
@@ -10,24 +10,27 @@ This guide takes you from a fresh clone to a working system you can click throug
 
 ## What you will have running
 
-| Part | Where | What it is |
-|---|---|---|
-| MySQL, Redis, ActiveMQ Artemis, Keycloak, Adminer, RedisInsight | Docker containers | Databases, cache, message broker, login server and two admin UIs |
-| customer, ingestion, detection, alert-case services | Your machine, ports 8082–8085 | The Java microservices |
-| gateway | Your machine, port **8080** | The single entry point for every API call |
-| Analyst console | Your machine or Docker, port **3000** | The web app you sign in to |
+Everything below runs as Docker containers on one network, `sentinel-network`.
+
+| Part | Container | Port on your machine | What it is |
+|---|---|---|---|
+| Analyst console | `sentinel-console` | **3000** | The web app you sign in to |
+| API gateway | `sentinel-gateway` | **8080** | The single entry point for every API call, and the combined Swagger UI |
+| customer, ingestion, detection, alert-case services | `sentinel-<name>-service` | 8082–8085 | The Java microservices |
+| Keycloak | `sentinel-keycloak` | 8180 | Login server: users, roles, tokens |
+| MySQL, Redis, ActiveMQ Artemis | `sentinel-mysql`, `-redis`, `-activemq` | 3306, 6379, 61616 (console 8161) | Databases, cache, message broker |
+| Adminer, RedisInsight | `sentinel-adminer`, `-redisinsight` | 8081, 5540 | Optional admin UIs for MySQL and Redis |
 
 ---
 
 ## Step 0 — Install the tools (once)
 
-| Tool | Version | Check it with | Get it |
-|---|---|---|---|
-| Docker Desktop | recent, **running** | `docker info` | docker.com |
-| Java (JDK) | **21** | `java -version` | e.g. Temurin 21 |
-| Maven | 3.9+ | `mvn -v` | maven.apache.org |
-| Node.js | **20 or newer** (22 recommended) | `node -v` | nodejs.org or nvm |
-| Postman (optional) | any | — | for API testing |
+| Tool | Version | Check it with |
+|---|---|---|
+| Docker Desktop (or OrbStack / Colima) | recent, **running**, at least **6 GB** of memory for Docker | `docker info` |
+| Postman (optional) | any | for API testing |
+
+That's all for running it. Java, Maven and Node.js are only needed for [developing locally](#developing-locally).
 
 These ports must be free: **3000, 3306, 5540, 6379, 8080, 8081, 8082, 8083, 8084, 8085, 8161, 8180, 61616**. To see what is using a port (macOS/Linux):
 
@@ -37,131 +40,31 @@ lsof -nP -iTCP:8080 -sTCP:LISTEN
 
 ---
 
-## Step 1 — Start the infrastructure
+## Step 1 — Start everything
 
 From the repository root (the folder that contains `docker-compose.yml`):
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-Wait until it is healthy, about 30–60 s the first time:
+The first run builds six images (the five services share one recipe, `services/Dockerfile`; the console uses `frontend/Dockerfile`) and downloads the rest. Later runs start in seconds.
+
+Containers start in order: infrastructure first, then the services once MySQL, Redis, ActiveMQ and Keycloak are healthy, then the gateway once all four services are healthy, then the console. Watch them come up:
 
 ```bash
 docker compose ps
 ```
 
-You are ready when `sentinel-mysql`, `sentinel-redis` and `sentinel-activemq` show **(healthy)** and `sentinel-keycloak` shows **Up**. Keycloak needs about 30 s more to finish loading. This should print `"sentinel"`:
+You are ready when every container shows **(healthy)** (Adminer and RedisInsight just show *Up*). That takes about 1–2 minutes after the build. To follow one service's log:
 
 ```bash
-curl -s localhost:8180/realms/sentinel | grep -o '"realm":"[a-z]*"'
+docker compose logs -f detection-service
 ```
 
 ---
 
-## Step 2 — Build the Java services
-
-```bash
-cd services
-```
-```bash
-mvn clean install -DskipTests
-```
-
-`BUILD SUCCESS` at the end means it worked. (Leave out `-DskipTests` to run all tests too; that takes a few minutes and needs Docker running.)
-
-> Rebuild only while the services are **stopped**: replacing a jar under a running service crashes it.
-
----
-
-## Step 3 — Start the five services
-
-Open **five terminal windows**, each in the `services` folder, and run one command per window. The order below keeps the logs easy to follow; any order works.
-
-**Terminal 1 — customer-service (8082)**
-```bash
-java -jar customer-service/target/customer-service-1.0.0-SNAPSHOT.jar
-```
-**Terminal 2 — ingestion-service (8083)**
-```bash
-java -jar ingestion-service/target/ingestion-service-1.0.0-SNAPSHOT.jar
-```
-**Terminal 3 — detection-service (8084)**
-```bash
-java -jar detection-service/target/detection-service-1.0.0-SNAPSHOT.jar
-```
-**Terminal 4 — alert-case-service (8085)**
-```bash
-java -jar alert-case-service/target/alert-case-service-1.0.0-SNAPSHOT.jar
-```
-**Terminal 5 — gateway (8080)**
-```bash
-java -jar gateway-service/target/gateway-service-1.0.0-SNAPSHOT.jar
-```
-
-Each one is ready when its window prints `Started …Application in … seconds`. Check all five at once (from any terminal):
-
-```bash
-for p in 8080 8082 8083 8084 8085; do printf "$p "; curl -s localhost:$p/actuator/health; echo; done
-```
-
-Every line should end in `{"status":"UP"}`.
-
----
-
-## Step 4 — Start the analyst console
-
-Pick **one** of the two ways.
-
-### Option A — Development mode (recommended while working on the code)
-
-From the repository root:
-
-```bash
-cd frontend
-```
-```bash
-cp .env.example .env.local
-```
-
-Now open `frontend/.env.local` in an editor and replace `change-me-to-a-long-random-string` after `NEXTAUTH_SECRET=` with a random value. This command prints one you can paste:
-
-```bash
-openssl rand -base64 32
-```
-
-Then install and start (the first `npm install` takes a minute):
-
-```bash
-npm install
-```
-```bash
-npm run dev
-```
-
-Ready when it prints `✓ Ready`. Leave this terminal open; `Ctrl+C` stops the console.
-
-### Option B — Docker (no Node.js needed)
-
-From the repository root:
-
-```bash
-docker compose --profile console up -d --build console
-```
-
-The first build takes 2–4 minutes. Ready when this shows **(healthy)**:
-
-```bash
-docker compose ps console
-```
-
-To stop it later: `docker compose stop console`.
-
-> Don't run both options at once: both use port 3000.
-
----
-
-## Step 5 — Sign in
+## Step 2 — Sign in
 
 Open **http://localhost:3000** and click **Continue with Keycloak**. On Keycloak's page, use one of the test accounts. **The password is the same as the username.**
 
@@ -171,15 +74,15 @@ Open **http://localhost:3000** and click **Continue with Keycloak**. On Keycloak
 | `senior1` | Senior analyst | All of the above, plus close cases, reveal national IDs (with a reason), change risk ratings, read the audit trail |
 | `admin1` | Administrator | Everything, plus change detection rules, handle dead letters, verify the audit chain |
 
-You land on **Overview**. Your name and role are at the bottom of the left sidebar, next to the **Sign out** button.
+You land on **Overview**. Your name and role are at the bottom of the left sidebar, next to the **Sign out** button. The three icons above your name switch the theme (system, light, dark).
 
-**Theme:** the three icons above your name switch between *System* (follows your computer), *Light* and *Dark*. The choice is remembered.
+How to use each page: the **[console user guide](console-user-guide.md)**.
 
 ---
 
-## Step 6 — A five-minute tour
+## Step 3 — A five-minute tour
 
-You need some data first. Keep the console open in your browser, then run these four commands in a new terminal. They:
+You need some data first. Keep the console open in your browser, then run these four commands in a terminal. They:
 
 1. get an admin token,
 2. register a customer,
@@ -205,8 +108,8 @@ Run all four in the **same** terminal: the later commands reuse `$TOKEN`, `$ACC`
 
 Then, in the console:
 
-1. **Live alert.** Within about a second a **New alert · ACC-TOUR-…** notice slides in at the top right, and the numbers update. No reload needed: the dot next to **Live** in the top bar shows the stream is connected.
-2. **Alert.** Click the notice, or go to **Alerts** and click the account. You see why it fired (the explanation and evidence), the risk score, and a **Decision** panel. Type a note and click **Move to Under review**.
+1. **Live alert.** Within about a second a **New alert** notification slides in at the top right, and the numbers update. No reload needed: the **Live** pill in the top bar shows the stream is connected.
+2. **Alert.** Click the notification, or go to **Alerts** and click the account. You see why it fired (the explanation and evidence), the risk score, and a **Decision** panel. Type a note and click **Move to Under review**. A green notification confirms it.
 3. **Case.** On the same page, in the **Case** panel, click **Open case**. You are now on the case page. Click **Assign to me**, then **Start investigating**, then add a note.
 4. **Close the case.** Closing needs a senior analyst. Sign out (bottom left), sign in as `senior1`, open **Cases**, pick your case, write a resolution and click **Close · no action needed**. The **History** panel lists every step with who did it.
 5. **Customer and PII.** As `senior1`, open the alert again and click its **Account** link (or go to **Customers** and search your `ACC-TOUR-…` account). You see *Tour Customer* with the national ID masked. Click **Reveal**, give a reason, and the full value shows for 60 seconds. As `analyst1` there is no Reveal button.
@@ -220,11 +123,12 @@ Then, in the console:
 | What | Address | Login |
 |---|---|---|
 | Analyst console | http://localhost:3000 | analyst1 / senior1 / admin1 |
-| API reference (all services, Swagger) | http://localhost:8080/swagger-ui.html | Click **Authorize**, paste a token (Step 6 shows how to get one) |
+| API reference (all services, Swagger) | http://localhost:8080/swagger-ui.html | Click **Authorize**, paste a token (Step 3 shows how to get one) |
 | Keycloak admin console | http://localhost:8180/admin | admin / admin |
 | Database (Adminer) | http://localhost:8081 | System **MySQL**, server **mysql**, user **root**, password **root** |
 | Redis (RedisInsight) | http://localhost:5540 | First time: *Add Redis database* → host **redis**, port **6379** |
 | Message broker (Artemis) | http://localhost:8161/console | admin / adminpassword |
+| Health of one service | `curl localhost:8085/actuator/health` | none |
 
 ---
 
@@ -232,7 +136,7 @@ Then, in the console:
 
 1. In Postman: **Import** → select both files in `docs/postman/`.
 2. Top right, choose the environment **Sentinel AML – Local**.
-3. Right-click the collection → **Run collection** → **Run**. Everything is tested in about a minute; it signs in by itself.
+3. Right-click the collection → **Run collection** → **Run**. It signs in by itself and tests everything in about a minute.
 
 Or from the command line, in the repository root:
 
@@ -240,21 +144,19 @@ Or from the command line, in the repository root:
 npx newman run docs/postman/Sentinel-AML.postman_collection.json -e docs/postman/Sentinel-AML-local.postman_environment.json
 ```
 
-Expected: **125 requests, 208 assertions, 0 failures.** The run adds test data (customers, alerts, cases) to your local database; that's harmless.
+The run adds test data (customers, alerts, cases) to your local database; that's harmless.
 
 ---
 
 ## Stopping
 
-1. Console: `Ctrl+C` in its terminal (Option A) or `docker compose stop console` (Option B).
-2. Services: `Ctrl+C` in each of the five terminals.
-3. Infrastructure (data is kept):
+Stop everything (data is kept):
 
 ```bash
 docker compose stop
 ```
 
-To start again later: Step 1, Step 3, Step 4 (no rebuild needed unless the code changed).
+Start again later with `docker compose up -d`. Add `--build` after pulling new code, so the images are rebuilt.
 
 ### Start completely fresh (deletes all local data)
 
@@ -262,7 +164,80 @@ To start again later: Step 1, Step 3, Step 4 (no rebuild needed unless the code 
 docker compose down -v
 ```
 
-This removes the databases and queues. Next time, everything is created again from scratch.
+This removes the containers, databases and queues. Next time, everything is created again from scratch.
+
+---
+
+## Developing locally
+
+When you work on the code, run the part you're changing on your machine and keep the rest in Docker.
+
+**Tools:** Java **21** (`java -version`), Maven 3.9+ (`mvn -v`), Node.js **20+** (`node -v`, 22 recommended).
+
+### Infrastructure only, everything else on your machine
+
+1. Start only the infrastructure and the two GUIs:
+
+   ```bash
+   docker compose up -d mysql redis activemq keycloak adminer redisinsight
+   ```
+
+2. Build the services (with them stopped: replacing a jar under a running service crashes it):
+
+   ```bash
+   cd services && mvn clean install -DskipTests
+   ```
+
+3. Start each service in its own terminal, from `services/`. Their defaults point at `localhost`, where the infrastructure ports are published:
+
+   ```bash
+   java -jar customer-service/target/customer-service-1.0.0-SNAPSHOT.jar
+   ```
+   ```bash
+   java -jar ingestion-service/target/ingestion-service-1.0.0-SNAPSHOT.jar
+   ```
+   ```bash
+   java -jar detection-service/target/detection-service-1.0.0-SNAPSHOT.jar
+   ```
+   ```bash
+   java -jar alert-case-service/target/alert-case-service-1.0.0-SNAPSHOT.jar
+   ```
+   ```bash
+   java -jar gateway-service/target/gateway-service-1.0.0-SNAPSHOT.jar
+   ```
+
+   Check them all (every line should end in `{"status":"UP"}`):
+
+   ```bash
+   for p in 8080 8082 8083 8084 8085; do printf "$p "; curl -s localhost:$p/actuator/health; echo; done
+   ```
+
+4. Start the console in development mode, from `frontend/`:
+
+   ```bash
+   cp .env.example .env.local
+   ```
+
+   Open `frontend/.env.local` and replace the value after `NEXTAUTH_SECRET=` with a random string; `openssl rand -base64 32` prints one. Then:
+
+   ```bash
+   npm install
+   ```
+   ```bash
+   npm run dev
+   ```
+
+   Ready when it prints `✓ Ready`. Don't run `npm run build` in the same folder while `npm run dev` is running: they share `frontend/.next`.
+
+### One part on your machine, the rest in Docker
+
+Stop that container and run your copy on the same port. For example, the console:
+
+```bash
+docker compose stop console
+```
+
+Then `npm run dev` in `frontend/` as above. For a Java service, `docker compose stop detection-service` and start its jar. The gateway in Docker can't see a service on your machine at `localhost`, so if you replace one of the four services behind it, run the gateway locally too (or recreate it with, for example, `CUSTOMER_SERVICE_URL=http://host.docker.internal:8082`).
 
 ---
 
@@ -270,13 +245,14 @@ This removes the databases and queues. Next time, everything is created again fr
 
 Do this once after pulling this version:
 
-1. **Recreate Keycloak** so it gets the console's login client and its fixed public address. This re-creates the test users too:
+1. **Stop any services or console you started by hand** (`Ctrl+C` in their terminals): the Docker containers now use the same ports.
+2. **Start everything** (this also recreates Keycloak and the broker with their current settings):
 
    ```bash
-   docker compose up -d keycloak
+   docker compose up -d --build
    ```
 
-2. **Rebuild the services** (Step 2) with all services stopped. The alert-case database gets new tables (cases, audit log) automatically on start.
+   Your data is kept: the databases and queues live in Docker volumes. The alert-case database gets any new tables automatically on start.
 3. **Sign in again** in the console. Old sessions are cleared automatically.
 
 ---
@@ -285,14 +261,14 @@ Do this once after pulling this version:
 
 | What you see | Why | What to do |
 |---|---|---|
-| Sign-in page shows *invalid client* or *invalid redirect uri* | Your Keycloak container is from before Phase 7 | `docker compose up -d keycloak`, wait 30 s, try again |
-| Console says "Could not reach the API" | The gateway (8080) isn't running | Start it (Step 3, terminal 5) |
-| Top bar stays on **Connecting** | alert-case-service isn't running | Start it (Step 3, terminal 4) |
-| Every page sends you back to sign in | `NEXTAUTH_SECRET` missing in `frontend/.env.local` | Redo Step 4, Option A |
-| `Port 3000 is in use` | The other console option is still running | Stop one of them |
-| A service exits with `AMQ219007` / `Cannot connect` | ActiveMQ not up yet | `docker compose ps`, wait for *healthy*, start the service again |
-| A service exits with a Flyway / MySQL error | MySQL not up yet | Same as above |
+| `Bind for 0.0.0.0:8080 failed: port is already allocated` (or 3000, 8082…) | Something you started by hand still uses the port | `lsof -nP -iTCP:8080 -sTCP:LISTEN`, stop that process, `docker compose up -d` again |
+| A service stays `(health: starting)`, then restarts | Not enough memory for Docker (five JVMs, Keycloak, MySQL, Artemis) | Give Docker at least 6 GB, then `docker compose up -d` |
+| `docker compose ps` shows a service *unhealthy* | It couldn't start | `docker compose logs <service>`; most often MySQL or the broker wasn't ready: `docker compose restart <service>` |
+| Sign-in page shows *invalid client* or *invalid redirect uri* | Your Keycloak container is from before Phase 7 | `docker compose up -d --force-recreate keycloak`, wait 30 s, try again |
+| Every API call returns 401 | Token from a different Keycloak, or expired | Get a new token (Step 3); tokens last 15 minutes |
+| Top bar in the console stays on **Connecting** | alert-case-service or the gateway isn't healthy | `docker compose ps`, then `docker compose logs alert-case-service` |
 | Lots of `429 Too Many Requests` from your own scripts | The gateway's rate limit (100 burst, 20 per second per user) | Slow down |
-| Console pages return 500 after `npm run build` | `build` and `dev` share `frontend/.next` | Stop the console, `rm -rf frontend/.next`, start it again |
+| Console pages return 500 after `npm run build` (local development) | `build` and `dev` share `frontend/.next` | Stop the console, `rm -rf frontend/.next`, start it again |
+| A rebuilt image still runs old code | `up -d` without `--build` reuses images | `docker compose up -d --build` |
 
 For deeper checks (SQL queries, Redis keys, broker queues per feature), see the [manual testing guide](manual-testing-guide.md). For why things are built the way they are, see the [architecture decision records](ADR/README.md).
