@@ -3,11 +3,14 @@ package com.sentinel.aml.alert_case_service.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sentinel.aml.common.event.RuleHitPayload;
+import com.sentinel.aml.alert_case_service.entity.AlertStatus;
+import com.sentinel.aml.common.event.AlertChangedEvent;
 import com.sentinel.aml.common.event.RuleHitsDetectedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -104,6 +107,7 @@ public class AlertIngestService {
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final ApplicationEventPublisher events;
 
     /** What happened to each hit of one event. */
     public record Outcome(int created, int merged, int duplicates) {
@@ -155,6 +159,10 @@ public class AlertIngestService {
             jdbc.update(APPLY_HIT, p);
             if (isNew) created++;
             else merged++;
+            // Raised inside the transaction, sent to the live-alerts topic only AFTER commit (AlertChangePublisher)
+            events.publishEvent(new AlertChangedEvent(alertId, event.accountId(), hit.ruleCode(),
+                    isNew ? AlertChangedEvent.Change.CREATED : AlertChangedEvent.Change.UPDATED,
+                    isNew ? AlertStatus.NEW.name() : null, clock.instant()));
         }
 
         Outcome outcome = new Outcome(created, merged, duplicates);

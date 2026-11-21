@@ -9,7 +9,10 @@ import com.sentinel.aml.alert_case_service.service.AlertQueryService;
 import com.sentinel.aml.common.constants.ApiRoutes;
 import com.sentinel.aml.common.dto.ApiResponse;
 import jakarta.validation.Valid;
+import com.sentinel.aml.alert_case_service.live.AlertStreamService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -29,6 +32,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AlertController {
 
     private final AlertQueryService alertService;
+    private final AlertStreamService alertStream;
 
     /** Highest risk first, then most recently active. All filters are optional. */
     @GetMapping
@@ -42,6 +46,15 @@ public class AlertController {
                 Sort.by(Sort.Order.desc("riskScore"), Sort.Order.desc("lastDetectedAt")));
         return ResponseEntity.ok(ApiResponse.<Page<AlertSummary>>builder().success(true)
                 .data(alertService.search(status, accountId, ruleCode, pageable)).build());
+    }
+
+    /**
+     * Live alert changes as Server-Sent Events (Phase 7): event "alert" carries an AlertChangedEvent.
+     * The console re-reads the queue when one arrives.
+     */
+    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter stream() {
+        return alertStream.subscribe();
     }
 
     @GetMapping("/stats")

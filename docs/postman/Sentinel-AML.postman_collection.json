@@ -5072,6 +5072,75 @@
           ]
         }
       ]
+    },
+    {
+      "name": "10 Phase 7 - Gateway limits",
+      "description": "Rate limiting (Redis token bucket per caller: burst 100, refill 20/s) and request body limits (1 MB JSON, 50 MB CSV uploads). A 429 needs a parallel burst; Postman sends requests one at a time, slower than the refill. See the manual guide for a one-line burst command.",
+      "item": [
+        {
+          "name": "1. Every response carries the caller's budget",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/alerts/stats",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"X-RateLimit-Limit is 100\", () => pm.expect(pm.response.headers.get(\"X-RateLimit-Limit\")).to.eql(\"100\"));",
+                  "pm.test(\"X-RateLimit-Remaining is a number\", () => pm.expect(Number(pm.response.headers.get(\"X-RateLimit-Remaining\"))).to.be.at.least(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Body over 1 MB is refused at the gateway (413)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/transactions",
+            "description": "Rejected before authentication and before any service sees it. CSV uploads to /api/v1/ingestion/batches get 50 MB instead.",
+            "body": {
+              "mode": "raw",
+              "raw": "{{bigBody}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// ~1.2 MB of JSON, built here so the collection file stays small",
+                  "pm.variables.set(\"bigBody\", JSON.stringify({ padding: \"x\".repeat(1200000) }));",
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 413\", () => pm.response.to.have.status(413));",
+                  "pm.test(\"JSON message\", () => pm.expect(pm.response.json().message).to.include(\"too large\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "auth": {

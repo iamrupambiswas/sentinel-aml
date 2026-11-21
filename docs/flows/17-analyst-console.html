@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analyst console & live alerts · Sentinel AML flows</title>
+<link rel="stylesheet" href="assets/flows.css?v=3">
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" aria-label="Flow pages"></nav>
+<main>
+<div class="eyebrow">Alerts</div>
+<h1>Analyst console & live alerts</h1>
+<p class="lede">How the Next.js console signs users in, keeps their tokens on the server, calls the gateway, and shows new alerts the moment they are committed (Phase 7, ADR-007).</p>
+<div class="chips"><span class="chip">App <b>frontend/ (Next.js 15.5)</b></span><span class="chip">Port <b>3000</b></span><span class="chip">Keycloak client <b>sentinel-console</b></span><span class="chip">Live topic <b>sentinel.alerts.changed</b></span></div>
+<h2>Live alert flow</h2><div class="diagram"><pre class="mermaid">
+sequenceDiagram
+    participant DET as detection
+    participant AC as alert-case (any pod)
+    participant T as topic sentinel.alerts.changed
+    participant AC2 as alert-case (the browser's pod)
+    participant GW as gateway
+    participant N as Next.js /api/live
+    participant B as browser EventSource
+    DET->>AC: RuleHitsDetectedEvent
+    AC->>AC: de-dup, commit
+    AC->>T: AlertChangedEvent (AFTER_COMMIT)
+    T->>AC2: copy to every pod
+    AC2-->>GW: SSE event "alert"
+    GW-->>N: flushed per chunk
+    N-->>B: same stream
+    B->>B: notice + router.refresh()
+</pre></div>
+<h2>Step by step</h2><ol class="steps">
+<li><b>Sign-in.</b> <code>middleware.ts</code> sends a request without a session to <code>/login</code>. The button starts next-auth's Keycloak sign-in: authorization code with PKCE S256 and <code>state</code>. Keycloak redirects back to <code>/api/auth/callback/keycloak</code>; next-auth swaps the code (plus verifier and client secret) for tokens.</li>
+<li><b>Session cookie.</b> <code>lib/auth.ts</code> keeps only access token, refresh token, expiry, username and roles in next-auth's encrypted, httpOnly cookie (about 2.9 KB). The browser never sees a token.</li>
+<li><b>Refresh.</b> On every page and <code>/api/live</code> request, <code>middleware.ts</code> checks the expiry. Within 30 s of it, <code>refreshSession()</code> posts the refresh token to Keycloak and rewrites the cookie on the response and on the current request. A refused refresh means the Keycloak session ended: cookie cleared, back to <code>/login</code>.</li>
+<li><b>Data.</b> Server components call <code>api()</code> in <code>lib/api.ts</code>, which sends <code>Authorization: Bearer &lt;the user's token&gt;</code> to the gateway. Changes (status, rule edit, replay, delete) are server actions doing the same. The services' own role rules decide; the UI only hides what a role can't do.</li>
+<li><b>Live changes.</b> <code>AlertIngestService</code> (new or merged hit) and <code>AlertQueryService.changeStatus</code> raise an <code>AlertChangedEvent</code> inside their transaction. <code>AlertChangePublisher</code> sends it to the topic only after commit.</li>
+<li><b>Fan-out.</b> Every alert-case pod's <code>AlertStreamService</code> listens on the topic (pub/sub factory) and writes the event to each of its open <code>SseEmitter</code>s. A comment line every 25 s keeps idle connections open. A failed send drops that connection only.</li>
+<li><b>Browser.</b> <code>LiveAlerts</code> opens <code>EventSource('/api/live')</code>. That route handler opens the gateway stream with the user's token and pipes it through. On each <code>alert</code> event it shows a notice (link to the alert) and calls <code>router.refresh()</code> after 500 ms without further events.</li>
+<li><b>Sign-out.</b> next-auth clears the cookie, then redirects to Keycloak's logout endpoint with <code>client_id</code> and <code>post_logout_redirect_uri</code>; Keycloak asks for confirmation (no ID token is stored) and returns to <code>/login</code>.</li>
+</ol>
+<h2>Screens</h2><div class="table-wrap"><table><thead><tr><th>Route</th><th>Role</th><th>Calls</th></tr></thead><tbody>
+<tr><td><code>/</code></td><td>ANALYST+</td><td><code>GET /api/v1/alerts/stats</code>, <code>GET /api/v1/alerts?status=NEW&amp;size=5</code>, ADMIN: <code>GET /api/v1/ops/dlq</code></td></tr>
+<tr><td><code>/alerts</code></td><td>ANALYST+</td><td><code>GET /api/v1/alerts?status&amp;ruleCode&amp;accountId&amp;page&amp;size</code></td></tr>
+<tr><td><code>/alerts/{id}</code></td><td>ANALYST+</td><td><code>GET /api/v1/alerts/{id}</code>, <code>PATCH /api/v1/alerts/{id}/status</code> with <code>expectedVersion</code></td></tr>
+<tr><td><code>/rules</code>, <code>/rules/{code}</code></td><td>ANALYST+ read, ADMIN edit</td><td><code>GET /api/v1/rules</code>, <code>GET …/{code}</code>, <code>GET …/{code}/versions</code>, <code>PUT …/{code}</code></td></tr>
+<tr><td><code>/ops</code></td><td>ADMIN</td><td><code>GET /api/v1/ops/dlq</code>, <code>GET …/{queue}</code>, <code>POST …/{queue}/replay</code>, <code>DELETE …/{queue}/messages/{id}</code></td></tr>
+<tr><td><code>/api/live</code></td><td>ANALYST+</td><td><code>GET /api/v1/alerts/stream</code> (SSE)</td></tr>
+</tbody></table></div>
+<h2>Components</h2><div class="table-wrap"><table><thead><tr><th>Component</th><th>Kind</th><th>Responsibility</th></tr></thead><tbody>
+<tr><td><a href="../../frontend/src/middleware.ts"><code>middleware.ts</code></a><span class="path">frontend/src/middleware.ts</span></td><td><span class="badge k-config">Config</span></td><td>Login redirect, token refresh, cookie rewrite</td></tr>
+<tr><td><a href="../../frontend/src/lib/auth.ts"><code>auth.ts</code></a><span class="path">frontend/src/lib/auth.ts</span></td><td><span class="badge k-config">Config</span></td><td>next-auth: Keycloak provider, PKCE, small session</td></tr>
+<tr><td><a href="../../frontend/src/lib/tokens.ts"><code>tokens.ts</code></a><span class="path">frontend/src/lib/tokens.ts</span></td><td><span class="badge k-service">Service</span></td><td>Roles, expiry, refresh, cookie chunks (unit-tested)</td></tr>
+<tr><td><a href="../../frontend/src/lib/api.ts"><code>api.ts</code></a><span class="path">frontend/src/lib/api.ts</span></td><td><span class="badge k-service">Service</span></td><td>Gateway client with the user's token, API types</td></tr>
+<tr><td><a href="../../frontend/src/app/api/live/route.ts"><code>api/live/route.ts</code></a><span class="path">frontend/src/app/api/live/route.ts</span></td><td><span class="badge k-controller">Controller</span></td><td>Same-origin SSE pipe to the gateway</td></tr>
+<tr><td><a href="../../frontend/src/components/LiveAlerts.tsx"><code>LiveAlerts</code></a><span class="path">frontend/src/components/LiveAlerts.tsx</span></td><td><span class="badge k-listener">Listener</span></td><td>EventSource, notices, debounced refresh</td></tr>
+<tr><td><a href="../../services/alert-case-service/src/main/java/com/sentinel/aml/alert_case_service/live/AlertChangePublisher.java"><code>AlertChangePublisher</code></a><span class="path">alert-case-service/…/live/AlertChangePublisher.java</span></td><td><span class="badge k-listener">Listener</span></td><td>AFTER_COMMIT → topic</td></tr>
+<tr><td><a href="../../services/alert-case-service/src/main/java/com/sentinel/aml/alert_case_service/live/AlertStreamService.java"><code>AlertStreamService</code></a><span class="path">alert-case-service/…/live/AlertStreamService.java</span></td><td><span class="badge k-service">Service</span></td><td>Topic listener, SSE emitters, heartbeat</td></tr>
+<tr><td><a href="../../services/common-lib/src/main/java/com/sentinel/aml/common/event/AlertChangedEvent.java"><code>AlertChangedEvent</code></a><span class="path">common-lib/…/event/AlertChangedEvent.java</span></td><td><span class="badge k-service">DTO / Event</span></td><td>Topic message contract</td></tr>
+</tbody></table></div>
+<h2>Data touched</h2><div class="table-wrap"><table><thead><tr><th>Store</th><th>Object</th><th>Access</th><th>When</th></tr></thead><tbody>
+<tr><td>Browser</td><td>cookie <code>next-auth.session-token</code></td><td><span class="badge b-rw">READ/WRITE</span></td><td>Encrypted tokens; rewritten on refresh</td></tr>
+<tr><td>Keycloak</td><td>client <code>sentinel-console</code></td><td><span class="badge b-read">READ</span></td><td>Login, refresh, logout</td></tr>
+<tr><td>ActiveMQ</td><td>topic <code>sentinel.alerts.changed</code></td><td><span class="badge b-rw">READ/WRITE</span></td><td>Every committed alert change; every alert-case pod subscribes</td></tr>
+<tr><td>Redis</td><td><code>rl:sub:{jwt subject}</code></td><td><span class="badge b-rw">READ/WRITE</span></td><td>Gateway rate limit for each console call</td></tr>
+</tbody></table></div>
+<h2>Failure paths</h2><div class="table-wrap"><table><thead><tr><th>What goes wrong</th><th>Result</th><th>Handled by</th></tr></thead><tbody>
+<tr><td>Keycloak session ended</td><td>Refresh refused → back to /login</td><td><code>middleware.ts</code></td></tr>
+<tr><td>Gateway or service down</td><td>Page shows "Could not reach the API"</td><td><code>errorMessage()</code></td></tr>
+<tr><td>Role not allowed</td><td>403 from the service, shown as a message</td><td>service <code>SecurityRoutes</code></td></tr>
+<tr><td>Two analysts on one alert</td><td>409, banner asks to reload</td><td><code>expectedVersion</code></td></tr>
+<tr><td>Live connection drops</td><td>Indicator shows "Connecting…", EventSource reconnects</td><td><code>LiveAlerts</code></td></tr>
+<tr><td>Broker down while broadcasting</td><td>Logged; screen catches up on next refresh</td><td><code>AlertChangePublisher</code></td></tr>
+</tbody></table></div>
+</main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/flows.js?v=3"></script>
+</body>
+</html>

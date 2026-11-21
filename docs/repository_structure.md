@@ -15,7 +15,7 @@ sentinel-aml/
 │   ├── ingestion-service/  # REST + CSV Batch ingestion, validation, FX to INR, and outbox pattern
 │   ├── detection-service/  # Core AML rule engine, risk scoring, and hot-reloading
 │   └── alert-case-service/ # Alert de-duplication, case management, and immutable hash-chained audit log
-├── frontend/               # Next.js 14+ analyst console with Tailwind, shadcn/ui, and React Flow
+├── frontend/               # Next.js 15 analyst console (Phase 7): Keycloak login on the server, live alerts over SSE, Tailwind
 ├── infra/                  # Infrastructure as Code (Terraform)
 │   ├── artemis/            # broker.properties: redelivery backoff + per-queue DLQs (mounted by docker-compose, Phase 5)
 │   ├── keycloak/           # sentinel-realm.json: roles, clients, test users (imported by docker-compose, Phase 6)
@@ -36,7 +36,7 @@ sentinel-aml/
 Each service within the `services/` directory operates as an independent bounded context. In accordance with the database-per-service pattern, they do not share databases; communication is handled asynchronously via ActiveMQ (events) or synchronously via REST (for gateway routing).
 
 ### Frontend (`/frontend`)
-The analyst console connects to the backend via the `gateway-service`. It handles OAuth2/OIDC authentication flows, live alert rendering via Server-Sent Events (SSE), and case management interfaces.
+The analyst console connects to the backend via the `gateway-service`, from its server only (tokens never reach the browser). It handles the OAuth2/OIDC login (authorization code + PKCE) and token refresh, live alert updates via Server-Sent Events (SSE), the alert queue and decisions, rule tuning and dead-letter operations. Case management comes later.
 
 ### Infrastructure & Deployment (`/infra`, `/deploy`)
 All AWS infrastructure is codified in Terraform under `infra/`. The `deploy/` directory bridges the gap between the application code and the infrastructure, providing the Helm charts required by the Jenkins CI/CD pipeline to deploy the microservices to Amazon EKS.

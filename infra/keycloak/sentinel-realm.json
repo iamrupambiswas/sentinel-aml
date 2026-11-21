@@ -4,19 +4,34 @@
   "accessTokenLifespan": 900,
   "roles": {
     "realm": [
-      { "name": "ANALYST", "description": "Reads customers, rules and alerts; works the alert queue" },
+      {
+        "name": "ANALYST",
+        "description": "Reads customers, rules and alerts; works the alert queue"
+      },
       {
         "name": "SENIOR_ANALYST",
         "description": "ANALYST plus customer and account risk-rating changes",
         "composite": true,
-        "composites": { "realm": ["ANALYST"] }
+        "composites": {
+          "realm": [
+            "ANALYST"
+          ]
+        }
       },
-      { "name": "INGEST", "description": "Machine role: submits transactions and batch files" },
+      {
+        "name": "INGEST",
+        "description": "Machine role: submits transactions and batch files"
+      },
       {
         "name": "ADMIN",
         "description": "Everything: rule tuning, DLQ, seeding, onboarding, ingestion",
         "composite": true,
-        "composites": { "realm": ["SENIOR_ANALYST", "INGEST"] }
+        "composites": {
+          "realm": [
+            "SENIOR_ANALYST",
+            "INGEST"
+          ]
+        }
       }
     ]
   },
@@ -39,6 +54,27 @@
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true
+    },
+    {
+      "clientId": "sentinel-console",
+      "name": "Analyst console (Next.js, Phase 7)",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "sentinel-console-dev-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:3000/api/auth/callback/keycloak"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000/*"
+      }
     }
   ],
   "users": [
@@ -49,8 +85,16 @@
       "firstName": "Asha",
       "lastName": "Analyst",
       "email": "analyst1@sentinel.local",
-      "credentials": [{ "type": "password", "value": "analyst1", "temporary": false }],
-      "realmRoles": ["ANALYST"]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "analyst1",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "ANALYST"
+      ]
     },
     {
       "username": "senior1",
@@ -59,8 +103,16 @@
       "firstName": "Sameer",
       "lastName": "Senior",
       "email": "senior1@sentinel.local",
-      "credentials": [{ "type": "password", "value": "senior1", "temporary": false }],
-      "realmRoles": ["SENIOR_ANALYST"]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "senior1",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "SENIOR_ANALYST"
+      ]
     },
     {
       "username": "admin1",
@@ -69,14 +121,24 @@
       "firstName": "Aditi",
       "lastName": "Admin",
       "email": "admin1@sentinel.local",
-      "credentials": [{ "type": "password", "value": "admin1", "temporary": false }],
-      "realmRoles": ["ADMIN"]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin1",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "ADMIN"
+      ]
     },
     {
       "username": "service-account-sentinel-ingest",
       "enabled": true,
       "serviceAccountClientId": "sentinel-ingest",
-      "realmRoles": ["INGEST"]
+      "realmRoles": [
+        "INGEST"
+      ]
     }
   ]
 }

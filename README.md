@@ -175,6 +175,7 @@ cd services && mvn test
 | MySQL (`sentinel-mysql`, :3306) | **Adminer** → http://localhost:8081 | System `MySQL`, server `mysql`, user `root`, password `root` | Databases: `customer_db`, `ingestion_db`, `sentinel_detection`, `alert_case_db` |
 | Redis (`sentinel-redis`, :6379) | **RedisInsight** → http://localhost:5540 | none | First time: *Add Redis database* → host `redis`, port `6379` |
 | ActiveMQ Artemis (`sentinel-activemq`, :61616) | **Artemis console** → http://localhost:8161/console | `admin` / `adminpassword` | *Artemis* tab → *Queues*: `sentinel.txn.ingested`, `sentinel.detection.hits`, topic `sentinel.rules.changed`, `DLQ.sentinel.*` (redelivery policy: `infra/artemis/broker.properties`) |
+| Analyst console (`frontend/`, :3000) | **Sentinel console** → http://localhost:3000 | `analyst1` / `senior1` / `admin1` (password = username) | Next.js; `cd frontend && npm install && npm run dev` after copying `.env.example` to `.env.local` (Phase 7) |
 | Keycloak (`sentinel-keycloak`) | **Admin console** → http://localhost:8180/admin | `admin` / `admin` | Realm `sentinel` is imported on start from `infra/keycloak/sentinel-realm.json` (roles, clients, test users) |
 
 Command-line alternatives: `docker exec -it sentinel-mysql mysql -uroot -proot --default-character-set=utf8mb4` and `docker exec -it sentinel-redis redis-cli`.
@@ -183,7 +184,7 @@ Command-line alternatives: `docker exec -it sentinel-mysql mysql -uroot -proot -
 
 | Service | Port | Swagger UI | Actuator |
 |---|---|---|---|
-| gateway-service | **8080** (use this for API calls) | – | `/actuator/health`, `/actuator/info` |
+| gateway-service | **8080** (use this for API calls; rate limit 100 burst / 20 per s per user, 413 over 1 MB) | – | `/actuator/health`, `/actuator/info` |
 | customer-service | 8082 | http://localhost:8082/swagger-ui.html | `/actuator/health` |
 | ingestion-service | 8083 | http://localhost:8083/swagger-ui.html | `/actuator/health`, `/info`, `/metrics` |
 | detection-service | 8084 | http://localhost:8084/swagger-ui.html | `/actuator/health`, `/info`, `/metrics` |
