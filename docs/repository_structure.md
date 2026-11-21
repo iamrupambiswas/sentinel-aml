@@ -28,7 +28,8 @@ sentinel-aml/
 │       └── dev/            # Environment-specific state and variables for development
 ├── deploy/                 # Kubernetes manifests and Helm charts for CI/CD deployment
 ├── load-tests/             # JMeter test plans and synthetic CSV seed data for performance benchmarking
-├── docker-compose.yml      # The whole application in one `docker compose up`: infrastructure, 5 services, gateway, console
+├── docker-compose.yml      # The whole application in one `docker compose up`: infrastructure, 5 services, gateway, console; `up -d infra` for infrastructure only
+├── docker-compose.ephemeral.yml # Optional override: every store in memory (tmpfs), nothing persisted
 ├── .env.example            # Template for 12-factor environment variables (No secrets in Git)
 ├── .gitignore              # Standard Git ignore rules for Java, Node, Terraform, etc.
 └── README.md               # Project front page detailing business problem, architecture, and setup

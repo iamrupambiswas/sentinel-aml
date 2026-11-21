@@ -1,0 +1,36 @@
+# No persistence: layer this on top of docker-compose.yml and every data store lives in memory (tmpfs).
+# Data is gone when a container stops or is recreated; your named volumes are not used, so whatever they
+# hold is left untouched for the next normal run.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.ephemeral.yml up -d --build   # everything
+#   docker compose -f docker-compose.yml -f docker-compose.ephemeral.yml up -d infra     # infrastructure only
+#
+# To make it your default on this machine, put this line in a .env file next to docker-compose.yml
+# (.env is git-ignored), then plain `docker compose …` commands use both files:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.ephemeral.yml
+#
+# Keycloak needs nothing here: in dev mode its database is inside the container and the realm is imported
+# from infra/keycloak on every fresh start. Every service creates its schema and runs Flyway on start.
+
+services:
+  mysql:
+    volumes: !reset []
+    tmpfs:
+      - /var/lib/mysql:mode=1777,size=1g
+
+  redis:
+    volumes: !reset []
+    tmpfs:
+      - /data:mode=1777   # RDB snapshots stay in memory too
+
+  activemq:
+    volumes: !override
+      - ./infra/artemis/broker.properties:/opt/sentinel/broker.properties:ro   # keep: redelivery + DLQ config
+    tmpfs:
+      # `artemis create` writes the broker instance here on start and runs scripts from it: exec, owned by 1001
+      - /var/lib/artemis-instance:exec,uid=1001,gid=1001,mode=0755,size=512m
+
+  redisinsight:
+    volumes: !reset []
+    tmpfs:
+      - /data:mode=1777

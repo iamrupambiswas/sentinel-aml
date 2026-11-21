@@ -1,6 +1,6 @@
 # Getting started: run Sentinel AML on your machine
 
-This guide takes you from a fresh clone to a working system you can click through. **One command starts everything** (databases, broker, login server, the five Java services and the analyst console) in Docker. If you want to change the code, [Developing locally](#developing-locally) shows how to run parts of it from your machine instead.
+This guide takes you from a fresh clone to a working system you can click through. **One command starts everything** (databases, broker, login server, the five Java services and the analyst console) in Docker. If you want to run the services or the console yourself, `docker compose up -d infra` starts only the infrastructure: see [Developing locally](#developing-locally).
 
 **Time needed:** about 10 minutes the first time (image downloads and builds), under a minute after that.
 
@@ -166,6 +166,34 @@ docker compose down -v
 
 This removes the containers, databases and queues. Next time, everything is created again from scratch.
 
+### Run without keeping any data
+
+By default MySQL, Redis and the broker store their data in Docker volumes, so it survives restarts. To run with nothing kept, add `docker-compose.ephemeral.yml`. It puts every store in memory (tmpfs), so all data is gone when the containers stop:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ephemeral.yml up -d --build
+```
+
+Infrastructure only, without keeping data:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ephemeral.yml up -d infra
+```
+
+Your volumes aren't used or changed in this mode: the next normal `docker compose up` finds your data exactly as you left it.
+
+To make this the default on your machine, create a file called `.env` next to `docker-compose.yml` (it's git-ignored) with this line. Plain `docker compose …` commands then use both files:
+
+```
+COMPOSE_FILE=docker-compose.yml:docker-compose.ephemeral.yml
+```
+
+Things to know in this mode:
+
+- Restart the **whole** stack (`docker compose down`, then `up -d`), not a single database container: restarting only MySQL, for example, empties it under the running services.
+- Keycloak's realm and test users are imported again on every fresh start, and each service creates its tables on start, so a fresh run works with no setup.
+- The data lives in Docker's memory: very large CSV imports need Docker to have enough memory (MySQL may use up to 1 GB, the broker 512 MB).
+
 ---
 
 ## Developing locally
@@ -176,11 +204,13 @@ When you work on the code, run the part you're changing on your machine and keep
 
 ### Infrastructure only, everything else on your machine
 
-1. Start only the infrastructure and the two GUIs:
+1. Start only the infrastructure (MySQL, Redis, Artemis, Keycloak) and the two GUIs. No service or console containers are created, so their ports stay free for you:
 
    ```bash
-   docker compose up -d mysql redis activemq keycloak adminer redisinsight
+   docker compose up -d infra
    ```
+
+   It returns once all of it is healthy. `infra` is a placeholder service that only waits for the infrastructure: in `docker compose ps` it shows as `sentinel-infra-ready … Exited (0)`, which is expected. Later, `docker compose up -d` adds everything else on top without restarting the infrastructure, and `docker compose stop` stops whatever is running.
 
 2. Build the services (with them stopped: replacing a jar under a running service crashes it):
 

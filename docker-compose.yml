@@ -1,8 +1,14 @@
-# Sentinel AML: the whole application in one command.
+# Sentinel AML: the whole application, or just its infrastructure.
 #
-#   docker compose up -d --build        # first run builds 6 images (a few minutes); later runs reuse them
+#   docker compose up -d --build        # EVERYTHING: infrastructure, 5 services, console (first run builds 6 images)
+#   docker compose up -d infra          # INFRASTRUCTURE ONLY: MySQL, Redis, Artemis, Keycloak + GUIs; run the
+#                                       # services / console yourself (returns once all of it is healthy)
 #   docker compose ps                   # wait until every service says "healthy"
 #   open http://localhost:3000          # analyst console (analyst1 / senior1 / admin1, password = username)
+#   docker compose stop                 # stops whatever is running, either way; data is kept in volumes
+#
+# No persistence wanted? Add docker-compose.ephemeral.yml (data in memory, gone on stop; see that file):
+#   docker compose -f docker-compose.yml -f docker-compose.ephemeral.yml up -d [--build | infra]
 #
 # Infrastructure (MySQL, Redis, ActiveMQ Artemis, Keycloak), the five Java services, the console and two
 # optional GUIs. Only the gateway (8080), the console (3000) and the tools are meant to be opened; the service
@@ -81,6 +87,8 @@ services:
     container_name: sentinel-redis
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data   # named, so its snapshot survives with MySQL (and no anonymous volume per recreate)
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -139,6 +147,29 @@ services:
       timeout: 5s
       retries: 18
       start_period: 30s
+    networks:
+      - sentinel-network
+
+  # "docker compose up -d infra" starts only what this depends on. It does no work itself: it starts once
+  # everything below is healthy, then exits (shows as "Exited (0)" in `docker compose ps`; that's expected).
+  infra:
+    image: redis:7.0-alpine   # any small image already in use; avoids an extra download
+    container_name: sentinel-infra-ready
+    entrypoint: ["true"]
+    restart: "no"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      activemq:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      adminer:
+        condition: service_started
+      redisinsight:
+        condition: service_started
     networks:
       - sentinel-network
 
@@ -294,6 +325,7 @@ services:
 
 volumes:
   mysql-data:
+  redis-data:
   artemis-data:
   redisinsight-data:
 

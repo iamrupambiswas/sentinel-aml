@@ -157,6 +157,8 @@ flowchart LR
     I["MySQL · Redis · Artemis · Keycloak"] --> S["customer · ingestion · detection · alert-case"] --> G["gateway :8080"] --> C["console :3000"]
 ```
 
+Only want the infrastructure, to run the services or console yourself? `docker compose up -d infra` instead (see [Develop locally](#develop-locally)). Both modes share the same containers and data: `docker compose up -d` later adds the rest, `docker compose stop` stops whatever is running.
+
 **3. Wait until everything is healthy** (about a minute after the build)
 ```bash
 docker compose ps
@@ -170,13 +172,19 @@ docker compose stop
 ```
 Start fresh, deleting all local data: `docker compose down -v`.
 
+**No persistence at all:** add the ephemeral file, which keeps MySQL, Redis and the broker in memory, so nothing survives a stop and your volumes are left untouched. It works with both modes (everything, or `infra`):
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ephemeral.yml up -d --build
+```
+Make it your machine's default with `COMPOSE_FILE=docker-compose.yml:docker-compose.ephemeral.yml` in a git-ignored `.env` file. Details: [docs/GETTING-STARTED.md#run-without-keeping-any-data](docs/GETTING-STARTED.md#run-without-keeping-any-data).
+
 Useful while it runs: `docker compose logs -f <service>` (e.g. `detection-service`), `docker compose restart <service>`, `docker compose up -d --build` after pulling new code.
 
 ### Develop locally
 
 Run the part you're changing on your machine and keep the rest in Docker. Tools: Java 21, Maven 3.9+, Node.js 20+ (22 recommended).
 
-- **Infrastructure only:** `docker compose up -d mysql redis activemq keycloak adminer redisinsight`, then build (`cd services && mvn clean install -DskipTests`) and start each service with `java -jar <service>/target/<service>-1.0.0-SNAPSHOT.jar` from `services/`. The services' defaults point at `localhost`.
+- **Infrastructure only:** `docker compose up -d infra` (MySQL, Redis, Artemis, Keycloak and the GUIs, no services or console; returns once healthy), then build (`cd services && mvn clean install -DskipTests`) and start each service with `java -jar <service>/target/<service>-1.0.0-SNAPSHOT.jar` from `services/`. The services' defaults point at `localhost`.
 - **Console with hot reload:** `docker compose stop console`, then in `frontend/`: `cp .env.example .env.local` (set `NEXTAUTH_SECRET`), `npm install`, `npm run dev`.
 - **One Java service:** `docker compose stop <service>` and run its jar. If it sits behind the gateway, run the gateway locally too.
 

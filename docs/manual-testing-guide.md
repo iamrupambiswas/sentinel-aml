@@ -30,8 +30,10 @@ flowchart LR
 From the repository root, start **only the infrastructure** (a plain `docker compose up` would also start the services in containers, on the same ports you're about to use):
 
 ```bash
-docker compose up -d mysql redis activemq keycloak adminer redisinsight
+docker compose up -d infra
 ```
+
+It returns when MySQL, Redis, Artemis and Keycloak are healthy (Adminer and RedisInsight start too). `sentinel-infra-ready` showing `Exited (0)` is expected: it's a placeholder that only waits for them.
 ```bash
 docker compose ps
 ```
