@@ -71,6 +71,19 @@ public class GlobalExceptionHandler {
                 .success(false).message(ex.getReason()).build());
     }
 
+    // Unknown URL or wrong HTTP method are client errors (404/405), not 500s
+    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNotFound(Exception ex) {
+        return new ResponseEntity<>(ApiResponse.<Void>builder()
+                .success(false).message("No endpoint " + ex.getMessage().replace("No static resource ", "")).build(), HttpStatus.NOT_FOUND);
+    }
+
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMethodNotAllowed(Exception ex) {
+        return new ResponseEntity<>(ApiResponse.<Void>builder()
+                .success(false).message(ex.getMessage()).build(), HttpStatus.METHOD_NOT_ALLOWED);
+    }
+
     // Handles everything else (Catch-all)
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleAllOtherExceptions(Exception ex) {

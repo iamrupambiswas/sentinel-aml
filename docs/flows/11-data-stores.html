@@ -13,7 +13,7 @@
 <div class="eyebrow">Reference</div>
 <h1>Data stores reference</h1>
 <p class="lede">Every table, Redis key and message destination, with the service that owns it and the classes that read or write it.</p>
-<div class="chips"><span class="chip">MySQL schemas <b>3 (+ case_db planned)</b></span><span class="chip">Redis prefixes <b>idempotency, fxRates, aml</b></span><span class="chip">Queues <b>2 + 1 topic</b></span></div>
+<div class="chips"><span class="chip">MySQL schemas <b>4</b></span><span class="chip">Redis prefixes <b>idempotency, fxRates, aml</b></span><span class="chip">Queues <b>2 + 1 topic + 2 DLQs</b></span></div>
 <h2>customer_db (customer-service)</h2><div class="diagram"><pre class="mermaid">
 erDiagram
     customer ||--o{ account : owns
@@ -82,6 +82,17 @@ erDiagram
 </pre></div><h2>sentinel_detection (detection-service)</h2><div class="diagram"><pre class="mermaid">
 erDiagram
     aml_rule ||--o{ aml_alert : triggers
+    aml_rule ||--o{ aml_rule_version : "history (P13)"
+    aml_rule_version {
+        bigint id PK
+        varchar rule_code FK
+        int version
+        decimal threshold_amount
+        json params
+        varchar changed_by
+        varchar change_reason
+        datetime changed_at
+    }
     aml_rule {
         varchar rule_code PK
         decimal threshold_amount
@@ -111,7 +122,32 @@ erDiagram
         varchar value
         boolean active
     }
-</pre></div><h2>Table ownership</h2><div class="table-wrap"><table><thead><tr><th>Table</th><th>Schema</th><th>Owner</th><th>Written by</th><th>Read by</th><th>Migration</th></tr></thead><tbody><tr><td>customer</td><td>customer_db</td><td>customer-service</td><td>CustomerProfileServiceImpl, DataSeederService</td><td>(GET endpoints planned)</td><td>V1</td></tr><tr><td>account</td><td>customer_db</td><td>customer-service</td><td>DataSeederService (cascade)</td><td>—</td><td>V1</td></tr><tr><td>transaction</td><td>ingestion_db</td><td>ingestion-service</td><td>TransactionPersister</td><td>—</td><td>V1, V4</td></tr><tr><td>outbox_event</td><td>ingestion_db</td><td>ingestion-service</td><td>TransactionPersister, OutboxPoller</td><td>OutboxPoller</td><td>V1, V4</td></tr><tr><td>fx_rate</td><td>ingestion_db</td><td>ingestion-service</td><td>V2 seed</td><td>FxRateServiceImpl</td><td>V2</td></tr><tr><td>ingestion_batch</td><td>ingestion_db</td><td>ingestion-service</td><td>BatchIngestionServiceImpl, BatchCompletionListener, BatchReconciliationListener</td><td>BatchIngestionServiceImpl</td><td>V3</td></tr><tr><td>ingestion_error</td><td>ingestion_db</td><td>ingestion-service</td><td>CsvSkipListener</td><td>BatchIngestionServiceImpl</td><td>V3, V4</td></tr><tr><td>BATCH_* (Spring Batch)</td><td>ingestion_db</td><td>ingestion-service</td><td>JobRepository</td><td>JobRepository</td><td>auto</td></tr><tr><td>aml_rule</td><td>sentinel_detection</td><td>detection-service</td><td>migrations V2, V4</td><td>RuleCacheServiceImpl</td><td>V2, V4</td></tr><tr><td>aml_alert</td><td>sentinel_detection</td><td>detection-service</td><td>TransactionConsumer</td><td>—</td><td>V3, V4</td></tr><tr><td>processed_event</td><td>sentinel_detection</td><td>detection-service</td><td>TransactionConsumer</td><td>TransactionConsumer</td><td>V1</td></tr><tr><td>watchlist_entry</td><td>sentinel_detection</td><td>detection-service</td><td>V5 seed</td><td>WatchlistService</td><td>V5</td></tr></tbody></table></div><h2>Redis keys</h2><div class="table-wrap"><table><thead><tr><th>Key pattern</th><th>Type</th><th>Service</th><th>Written by</th><th>TTL</th></tr></thead><tbody><tr><td>idempotency:txn:{key}</td><td>STRING</td><td>ingestion</td><td>TransactionIngestionServiceImpl</td><td>24 h</td></tr><tr><td>fxRates::{currency}</td><td>STRING (serialized)</td><td>ingestion</td><td>Spring Cache (FxRateServiceImpl)</td><td>1 h</td></tr><tr><td>aml:win:struct:{acct}</td><td>ZSET</td><td>detection</td><td>StructuringRule</td><td>window + 1 h</td></tr><tr><td>aml:win:cr:{acct}, aml:win:dr:{acct}</td><td>ZSET</td><td>detection</td><td>RapidMovementRule</td><td>window + 1 h</td></tr><tr><td>aml:win:round:{acct}</td><td>ZSET</td><td>detection</td><td>RoundAmountRule</td><td>window + 1 h</td></tr><tr><td>aml:day:{acct}:{yyyyMMdd}</td><td>HASH</td><td>detection</td><td>BehavioralDeviationRule</td><td>95 days</td></tr><tr><td>aml:baseline:{acct}</td><td>STRING</td><td>detection</td><td>BaselineJob</td><td>3 days</td></tr><tr><td>aml:accounts:active</td><td>SET</td><td>detection</td><td>DetectionEngine</td><td>none</td></tr><tr><td>aml:acct-risk:{acct}</td><td>STRING</td><td>detection (reader)</td><td>customer-service (Phase 5)</td><td>—</td></tr></tbody></table></div><h2>ActiveMQ destinations</h2><div class="table-wrap"><table><thead><tr><th>Destination</th><th>Type</th><th>Producer</th><th>Consumer</th><th>Payload (_type)</th></tr></thead><tbody><tr><td>sentinel.txn.ingested</td><td>queue</td><td>OutboxPoller</td><td>TransactionConsumer</td><td>TransactionIngested</td></tr><tr><td>sentinel.detection.hits</td><td>queue</td><td>TransactionConsumer</td><td>alert-case-service (Phase 5)</td><td>RuleHitsDetected</td></tr><tr><td>sentinel.rules.changed</td><td>topic</td><td>rule admin API (Phase 5)</td><td>every detection instance (Phase 5)</td><td>—</td></tr></tbody></table></div>
+</pre></div><h2>alert_case_db (alert-case-service)</h2><div class="diagram"><pre class="mermaid">
+erDiagram
+    alert ||--o{ alert_hit : "evidence"
+    alert {
+        varchar id PK
+        varchar dedup_key UK "account:rule:windowBucket"
+        varchar account_id
+        varchar rule_code
+        varchar status
+        decimal risk_score "max seen"
+        int hit_count
+        datetime first_txn_at
+        datetime last_txn_at
+        int version "optimistic lock"
+    }
+    alert_hit {
+        bigint id PK
+        varchar alert_id FK
+        varchar event_id "UK with rule_code"
+        varchar rule_code
+        varchar transaction_id
+        decimal risk_score
+        json evidence_txn_ids
+        datetime txn_timestamp
+    }
+</pre></div><h2>Table ownership</h2><div class="table-wrap"><table><thead><tr><th>Table</th><th>Schema</th><th>Owner</th><th>Written by</th><th>Read by</th><th>Migration</th></tr></thead><tbody><tr><td>customer</td><td>customer_db</td><td>customer-service</td><td>CustomerProfileServiceImpl, DataSeederService</td><td>AccountController (GET customer, accounts)</td><td>V1</td></tr><tr><td>account</td><td>customer_db</td><td>customer-service</td><td>DataSeederService (cascade), AccountService</td><td>AccountService, AccountRiskSyncService</td><td>V1</td></tr><tr><td>transaction</td><td>ingestion_db</td><td>ingestion-service</td><td>TransactionPersister</td><td>—</td><td>V1, V4</td></tr><tr><td>outbox_event</td><td>ingestion_db</td><td>ingestion-service</td><td>TransactionPersister, OutboxPoller</td><td>OutboxPoller</td><td>V1, V4</td></tr><tr><td>fx_rate</td><td>ingestion_db</td><td>ingestion-service</td><td>V2 seed</td><td>FxRateServiceImpl</td><td>V2</td></tr><tr><td>ingestion_batch</td><td>ingestion_db</td><td>ingestion-service</td><td>BatchIngestionServiceImpl, BatchCompletionListener, BatchReconciliationListener</td><td>BatchIngestionServiceImpl</td><td>V3</td></tr><tr><td>ingestion_error</td><td>ingestion_db</td><td>ingestion-service</td><td>CsvSkipListener</td><td>BatchIngestionServiceImpl</td><td>V3, V4</td></tr><tr><td>BATCH_* (Spring Batch)</td><td>ingestion_db</td><td>ingestion-service</td><td>JobRepository</td><td>JobRepository</td><td>auto</td></tr><tr><td>aml_rule</td><td>sentinel_detection</td><td>detection-service</td><td>migrations V2, V4; RuleAdminService</td><td>RuleCacheServiceImpl, RuleAdminService</td><td>V2, V4</td></tr><tr><td>aml_rule_version</td><td>sentinel_detection</td><td>detection-service</td><td>V6 baseline; RuleAdminService</td><td>RuleAdminService (history)</td><td>V6</td></tr><tr><td>aml_alert</td><td>sentinel_detection</td><td>detection-service</td><td>TransactionConsumer</td><td>—</td><td>V3, V4</td></tr><tr><td>processed_event</td><td>sentinel_detection</td><td>detection-service</td><td>TransactionConsumer</td><td>TransactionConsumer</td><td>V1</td></tr><tr><td>watchlist_entry</td><td>sentinel_detection</td><td>detection-service</td><td>V5 seed</td><td>WatchlistService</td><td>V5</td></tr><tr><td>alert</td><td>alert_case_db</td><td>alert-case-service</td><td>AlertIngestService (SQL), AlertQueryService (status)</td><td>AlertQueryService</td><td>V1</td></tr><tr><td>alert_hit</td><td>alert_case_db</td><td>alert-case-service</td><td>AlertIngestService</td><td>AlertQueryService</td><td>V1</td></tr></tbody></table></div><h2>Redis keys</h2><div class="table-wrap"><table><thead><tr><th>Key pattern</th><th>Type</th><th>Service</th><th>Written by</th><th>TTL</th></tr></thead><tbody><tr><td>idempotency:txn:{key}</td><td>STRING</td><td>ingestion</td><td>TransactionIngestionServiceImpl</td><td>24 h</td></tr><tr><td>fxRates::{currency}</td><td>STRING (serialized)</td><td>ingestion</td><td>Spring Cache (FxRateServiceImpl)</td><td>1 h</td></tr><tr><td>aml:win:struct:{acct}</td><td>ZSET</td><td>detection</td><td>StructuringRule</td><td>window + 1 h</td></tr><tr><td>aml:win:cr:{acct}, aml:win:dr:{acct}</td><td>ZSET</td><td>detection</td><td>RapidMovementRule</td><td>window + 1 h</td></tr><tr><td>aml:win:round:{acct}</td><td>ZSET</td><td>detection</td><td>RoundAmountRule</td><td>window + 1 h</td></tr><tr><td>aml:day:{acct}:{yyyyMMdd}</td><td>HASH</td><td>detection</td><td>BehavioralDeviationRule</td><td>95 days</td></tr><tr><td>aml:baseline:{acct}</td><td>STRING</td><td>detection</td><td>BaselineJob</td><td>3 days</td></tr><tr><td>aml:accounts:active</td><td>SET</td><td>detection</td><td>DetectionEngine</td><td>none</td></tr><tr><td>aml:acct-risk:{acct}</td><td>STRING</td><td>detection (reader)</td><td>customer-service: after commit + full resync at startup</td><td>none (mirror of customer_db)</td></tr></tbody></table></div><h2>ActiveMQ destinations</h2><div class="table-wrap"><table><thead><tr><th>Destination</th><th>Type</th><th>Producer</th><th>Consumer</th><th>Payload (_type)</th></tr></thead><tbody><tr><td>sentinel.txn.ingested</td><td>queue</td><td>OutboxPoller</td><td>TransactionConsumer</td><td>TransactionIngested</td></tr><tr><td>sentinel.detection.hits</td><td>queue</td><td>TransactionConsumer</td><td>DetectionHitsConsumer (alert-case-service)</td><td>RuleHitsDetected</td></tr><tr><td>sentinel.rules.changed</td><td>topic</td><td>RuleChangePublisher (after commit)</td><td>RulesChangedListener on every detection instance</td><td>RulesChanged</td></tr><tr><td>DLQ.sentinel.txn.ingested</td><td>queue on address DLQ</td><td>broker, after 5 failed attempts</td><td>DeadLetterService (browse / replay / delete)</td><td>original</td></tr><tr><td>DLQ.sentinel.detection.hits</td><td>queue on address DLQ</td><td>broker, after 5 failed attempts</td><td>DeadLetterService</td><td>original</td></tr></tbody></table></div>
 </main>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>

@@ -7,7 +7,8 @@
       ["02-gateway-routing.html", "Gateway routing"] ] },
     { group: "Customer", items: [
       ["03-customer-onboarding.html", "Customer onboarding & PII"],
-      ["04-customer-seeding.html", "Synthetic data seeding"] ] },
+      ["04-customer-seeding.html", "Synthetic data seeding"],
+      ["15-account-risk-sync.html", "Account risk ratings to Redis"] ] },
     { group: "Ingestion", items: [
       ["05-streaming-ingestion.html", "Streaming ingestion (REST)"],
       ["06-batch-ingestion.html", "Batch CSV ingestion"],
@@ -15,7 +16,12 @@
     { group: "Detection", items: [
       ["08-detection-pipeline.html", "Detection pipeline"],
       ["09-detection-rules.html", "The six AML rules"],
-      ["10-rule-config-and-baseline.html", "Rule config, watchlist & baseline"] ] },
+      ["10-rule-config-and-baseline.html", "Rule config, watchlist & baseline"],
+      ["13-rule-hot-reload.html", "Live rule tuning & hot reload"] ] },
+    { group: "Alerts", items: [
+      ["12-alert-dedup.html", "Alert de-duplication & workflow"] ] },
+    { group: "Operations", items: [
+      ["14-dead-letters.html", "Poison messages & DLQ replay"] ] },
     { group: "Reference", items: [
       ["11-data-stores.html", "Data stores reference"] ] }
   ];
@@ -33,7 +39,7 @@
   // ---- sidebar ----
   const side = document.querySelector(".sidebar");
   if (side) {
-    let html = '<div class="brand">Sentinel AML</div><div class="brand-sub">Flow documentation &middot; Phases 0&ndash;4</div>';
+    let html = '<div class="brand">Sentinel AML</div><div class="brand-sub">Flow documentation &middot; Phases 0&ndash;5</div>';
     for (const g of PAGES) {
       html += "<h4>" + g.group + "</h4>";
       for (const [href, label] of g.items) {

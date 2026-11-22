@@ -44,6 +44,8 @@ services:
       - "8161:8161"   # Web Console
     volumes:
       - artemis-data:/var/lib/artemis-instance   # persistent queues survive broker restarts (X2)
+      # P21: redelivery backoff + per-queue dead-letter queues for every sentinel.* address
+      - ./infra/artemis/broker.properties:/var/lib/artemis-instance/etc/broker.properties:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8161/console"]
       interval: 15s

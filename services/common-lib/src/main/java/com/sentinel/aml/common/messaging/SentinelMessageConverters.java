@@ -3,6 +3,7 @@ package com.sentinel.aml.common.messaging;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sentinel.aml.common.constants.MessagingConstants;
 import com.sentinel.aml.common.event.RuleHitsDetectedEvent;
+import com.sentinel.aml.common.event.RulesChangedEvent;
 import com.sentinel.aml.common.event.TransactionIngestedEvent;
 import org.springframework.jms.support.converter.MappingJackson2MessageConverter;
 import org.springframework.jms.support.converter.MessageConverter;
@@ -25,7 +26,8 @@ public final class SentinelMessageConverters {
         converter.setTypeIdPropertyName(MessagingConstants.TYPE_HEADER);
         converter.setTypeIdMappings(Map.of(
                 MessagingConstants.TYPE_TRANSACTION_INGESTED, TransactionIngestedEvent.class,
-                MessagingConstants.TYPE_RULE_HITS_DETECTED, RuleHitsDetectedEvent.class
+                MessagingConstants.TYPE_RULE_HITS_DETECTED, RuleHitsDetectedEvent.class,
+                MessagingConstants.TYPE_RULES_CHANGED, RulesChangedEvent.class
         ));
         return converter;
     }

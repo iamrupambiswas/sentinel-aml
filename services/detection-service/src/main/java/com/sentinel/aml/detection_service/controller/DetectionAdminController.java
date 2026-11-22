@@ -1,7 +1,6 @@
 package com.sentinel.aml.detection_service.controller;
 
 import com.sentinel.aml.common.dto.ApiResponse;
-import com.sentinel.aml.detection_service.engine.RuleConfig;
 import com.sentinel.aml.detection_service.job.BaselineJob;
 import com.sentinel.aml.detection_service.service.RuleCacheService;
 import com.sentinel.aml.detection_service.service.WatchlistService;
@@ -9,9 +8,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Map;
 
-/** Operational endpoints. Phase 6: restrict to RULE_ADMIN. Phase 5 adds PUT /api/v1/rules/{code}. */
+/** Operational endpoints. Phase 6: restrict to RULE_ADMIN. Rule CRUD lives in rules.RuleAdminController (P13). */
 @RestController
 @RequiredArgsConstructor
 public class DetectionAdminController {
@@ -19,12 +17,6 @@ public class DetectionAdminController {
     private final RuleCacheService ruleCache;
     private final WatchlistService watchlist;
     private final BaselineJob baselineJob;
-
-    @GetMapping("/api/v1/rules")
-    public ResponseEntity<ApiResponse<Map<String, RuleConfig>>> activeRules() {
-        return ResponseEntity.ok(ApiResponse.<Map<String, RuleConfig>>builder()
-                .success(true).data(ruleCache.getActiveRules()).build());
-    }
 
     @PostMapping("/api/v1/detection/rules/reload")
     public ResponseEntity<ApiResponse<String>> reloadRules() {

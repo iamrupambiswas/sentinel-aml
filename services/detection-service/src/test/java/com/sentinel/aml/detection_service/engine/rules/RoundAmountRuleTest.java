@@ -66,4 +66,14 @@ class RoundAmountRuleTest {
         for (int i = 0; i < 4; i++) rule.evaluate(debit("500000", plus(Duration.ofDays(i))), cfg);
         assertThat(rule.evaluate(debit("500000", plus(Duration.ofDays(7).plusMinutes(1))), cfg)).isEmpty();
     }
+
+    @Test
+    void six_transfers_evaluated_newest_first_still_fire() {
+        for (int i = 5; i >= 2; i--) {
+            assertThat(rule.evaluate(debit("500000", plus(Duration.ofDays(i))), cfg)).isEmpty();
+        }
+        assertThat(rule.evaluate(debit("500000", plus(Duration.ofDays(1))), cfg)).isPresent();
+        var last = rule.evaluate(debit("500000", T0), cfg);
+        assertThat(last.orElseThrow().evidenceTxnIds()).hasSize(6);
+    }
 }

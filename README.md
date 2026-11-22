@@ -55,8 +55,8 @@ flowchart TB
     subgraph Persistence [MySQL 8 Data Layer - AWS RDS]
         DB_CUST[(customer_db)]:::database
         DB_INGEST[(ingestion_db)]:::database
-        DB_DETECT[(detection_db)]:::database
-        DB_ALERT[(case_db)]:::database
+        DB_DETECT[(sentinel_detection)]:::database
+        DB_ALERT[(alert_case_db)]:::database
     end
 
     %% Routing & Authentication
@@ -69,6 +69,7 @@ flowchart TB
     SCG -->|/api/v1/customers| CUST
     SCG -->|/api/v1/ingestion| INGEST
     SCG -->|/api/v1/alerts| ALERT
+    SCG -->|/api/v1/rules, /api/v1/ops| DETECT
 
     %% Async Event Flow (The < 1s Pipeline)
     INGEST -->|1. Store Txn & Outbox| DB_INGEST
@@ -80,7 +81,9 @@ flowchart TB
     DETECT -->|6. Publish detection.hits| AMQ
     
     AMQ -->|7. Consume| ALERT
-    ALERT -->|8. Save Immutable Audit| DB_ALERT
+    ALERT -->|8. De-duplicate into one alert per pattern| DB_ALERT
+    DETECT -.->|rules.changed topic: hot reload| AMQ
+    CUST -.->|account risk ratings| REDIS
     
     CUST -->|Read/Write Profile| DB_CUST
 ```
@@ -150,12 +153,15 @@ java -jar ingestion-service/target/ingestion-service-1.0.0-SNAPSHOT.jar
 java -jar detection-service/target/detection-service-1.0.0-SNAPSHOT.jar
 ```
 ```bash
+java -jar alert-case-service/target/alert-case-service-1.0.0-SNAPSHOT.jar
+```
+```bash
 java -jar gateway-service/target/gateway-service-1.0.0-SNAPSHOT.jar
 ```
 
 **5. Test** with the Postman collection in `docs/postman/`. The step-by-step guide, including how to verify each request in MySQL, Redis, ActiveMQ and the logs, is in [`docs/manual-testing-guide.md`](docs/manual-testing-guide.md).
 
-**6. Unit tests**
+**6. Tests** (alert-case-service's 50-thread de-dup test starts a MySQL Testcontainer, so Docker must be running; without Docker it is skipped)
 ```bash
 cd services && mvn test
 ```
@@ -166,9 +172,9 @@ cd services && mvn test
 
 | Container | Web UI | Login | Notes |
 |---|---|---|---|
-| MySQL (`sentinel-mysql`, :3306) | **Adminer** → http://localhost:8081 | System `MySQL`, server `mysql`, user `root`, password `root` | Databases: `customer_db`, `ingestion_db`, `sentinel_detection` |
+| MySQL (`sentinel-mysql`, :3306) | **Adminer** → http://localhost:8081 | System `MySQL`, server `mysql`, user `root`, password `root` | Databases: `customer_db`, `ingestion_db`, `sentinel_detection`, `alert_case_db` |
 | Redis (`sentinel-redis`, :6379) | **RedisInsight** → http://localhost:5540 | none | First time: *Add Redis database* → host `redis`, port `6379` |
-| ActiveMQ Artemis (`sentinel-activemq`, :61616) | **Artemis console** → http://localhost:8161/console | `admin` / `adminpassword` | *Artemis* tab → *Queues*: `sentinel.txn.ingested`, `sentinel.detection.hits`, `DLQ` |
+| ActiveMQ Artemis (`sentinel-activemq`, :61616) | **Artemis console** → http://localhost:8161/console | `admin` / `adminpassword` | *Artemis* tab → *Queues*: `sentinel.txn.ingested`, `sentinel.detection.hits`, topic `sentinel.rules.changed`, `DLQ.sentinel.*` (redelivery policy: `infra/artemis/broker.properties`) |
 | Keycloak (`sentinel-keycloak`) | **Admin console** → http://localhost:8180/admin | `admin` / `admin` | Used from Phase 6 |
 
 Command-line alternatives: `docker exec -it sentinel-mysql mysql -uroot -proot --default-character-set=utf8mb4` and `docker exec -it sentinel-redis redis-cli`.
@@ -181,6 +187,7 @@ Command-line alternatives: `docker exec -it sentinel-mysql mysql -uroot -proot -
 | customer-service | 8082 | http://localhost:8082/swagger-ui.html | `/actuator/health` |
 | ingestion-service | 8083 | http://localhost:8083/swagger-ui.html | `/actuator/health`, `/info`, `/metrics` |
 | detection-service | 8084 | http://localhost:8084/swagger-ui.html | `/actuator/health`, `/info`, `/metrics` |
+| alert-case-service | 8085 | http://localhost:8085/swagger-ui.html | `/actuator/health`, `/info`, `/metrics` |
 
 Raw OpenAPI JSON for each service: `http://localhost:<port>/v3/api-docs`.
 
@@ -189,15 +196,25 @@ Raw OpenAPI JSON for each service: `http://localhost:<port>/v3/api-docs`.
 | Method | Route | Service | Purpose |
 |---|---|---|---|
 | POST | `/api/v1/customers` | customer | Onboard a customer (PII encrypted, masked response) |
-| POST | `/api/v1/admin/seed-data` | customer | Generate 5,000 synthetic customers |
+| GET | `/api/v1/customers/{id}` | customer | Customer with accounts and effective risk ratings |
+| POST | `/api/v1/customers/{id}/accounts` | customer | Open an account (optional explicit `accountId`, e.g. `ACC-RAPID-01`) |
+| PUT | `/api/v1/customers/{id}/risk-rating` | customer | Change customer risk; republishes every account to Redis |
+| GET / PUT | `/api/v1/accounts/{id}` · `/api/v1/accounts/{id}/risk-rating` | customer | Account view / account risk change |
+| POST | `/api/v1/admin/seed-data` | customer | Generate 5,000 synthetic customers (then syncs risk ratings to Redis) |
+| POST | `/api/v1/admin/risk-sync` | customer | Full resync of `aml:acct-risk:*` |
 | POST | `/api/v1/transactions` | ingestion | Ingest one transaction (`Idempotency-Key` header required) |
 | POST | `/api/v1/ingestion/batches` | ingestion | Upload a CSV (multipart field `file`) |
 | GET | `/api/v1/ingestion/batches/{id}` | ingestion | Batch status + rejected-row report |
-| GET | `/api/v1/rules` | detection | Active AML rules and parameters |
+| GET | `/api/v1/rules` · `/api/v1/rules/{code}` · `/api/v1/rules/{code}/versions` | detection | All rules with DB and live-loaded version; audit history |
+| PUT | `/api/v1/rules/{code}` | detection | Change a rule (`expectedVersion`, `changedBy`, `reason`); live on every pod in ms |
 | POST | `/api/v1/detection/rules/reload` | detection | Reload rules and watchlist from the DB |
 | POST | `/api/v1/detection/baseline/recompute` | detection | Run the 90-day baseline job now |
+| GET | `/api/v1/ops/dlq` · `/api/v1/ops/dlq/{queue}` | detection | Dead-letter depth / browse |
+| POST · DELETE | `/api/v1/ops/dlq/{queue}/replay` · `/api/v1/ops/dlq/{queue}/messages/{id}` | detection | Replay to the source queue / delete one |
+| GET | `/api/v1/alerts?status=&accountId=&ruleCode=` · `/api/v1/alerts/{id}` · `/api/v1/alerts/stats` | alert-case | De-duplicated alerts, detail with hits, noise statistics |
+| PATCH | `/api/v1/alerts/{id}/status` | alert-case | Analyst workflow (NEW → UNDER_REVIEW → ESCALATED → CLOSED_*) |
 
-Detection metrics: `http://localhost:8084/actuator/metrics/sentinel_ingest_to_detection_latency`, `sentinel_detection_latency`, `sentinel_rule_hits_total`.
+Detection metrics: `http://localhost:8084/actuator/metrics/sentinel_ingest_to_detection_latency`, `sentinel_detection_latency`, `sentinel_rule_hits_total`, `sentinel_rule_reload_lag`. Alert metrics (:8085): `sentinel_alerts_created_total`, `sentinel_alert_hits_merged_total`, `sentinel_alert_hits_duplicate_total`.
 
 Flow diagrams for every route: open `docs/flows/index.html` in a browser.
 

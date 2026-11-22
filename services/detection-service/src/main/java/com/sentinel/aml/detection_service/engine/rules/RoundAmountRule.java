@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Rule 6 (P11): >= N "suspiciously round" transactions in the window. Round means an exact
@@ -28,12 +29,18 @@ public class RoundAmountRule implements DetectionRule {
     }
 
     @Override
+    public Set<String> supportedParams() {
+        return Set.of("ctrThresholdInr", "minAmountInr", "modulo", "nearThresholdPct");
+    }
+
+    @Override
     public Optional<RuleHit> evaluate(TransactionContext ctx, RuleConfig config) {
         if (!isSuspiciouslyRound(ctx, config)) {
             return Optional.empty();
         }
-        List<WindowEntry> window = store.addAndGet("aml:win:round:" + ctx.accountId(),
+        List<WindowEntry> around = store.addAndGet("aml:win:round:" + ctx.accountId(),
                 new WindowEntry(ctx.transactionId(), ctx.amountInr(), ctx.txnTimeMillis()), config.window());
+        List<WindowEntry> window = RuleSupport.fullestWindowContaining(around, ctx.txnTimeMillis(), config.window());
 
         if (window.size() < config.threshold().intValue()) {
             return Optional.empty();

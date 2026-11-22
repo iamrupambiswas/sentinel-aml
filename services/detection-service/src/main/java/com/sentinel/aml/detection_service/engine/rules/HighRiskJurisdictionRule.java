@@ -9,6 +9,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /** Rule 4 (P9): counterparty country on the watchlist, or counterparty name fuzzy-matches a listed name. */
 @Component
@@ -21,6 +22,11 @@ public class HighRiskJurisdictionRule implements DetectionRule {
     @Override
     public String getRuleCode() {
         return CODE;
+    }
+
+    @Override
+    public Set<String> supportedParams() {
+        return Set.of("nameSimilarity");
     }
 
     @Override

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Poison messages & dead-letter replay · Sentinel AML flows</title>
+<link rel="stylesheet" href="assets/flows.css?v=3">
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" aria-label="Flow pages"></nav>
+<main>
+<div class="eyebrow">Operations</div>
+<h1>Poison messages & dead-letter replay</h1>
+<p class="lede">What happens to a message a consumer can never process, how the broker stops retrying it, and how an operator inspects, replays or deletes it.</p>
+<div class="chips"><span class="chip">Policy <b>5 attempts, 1 s x2 backoff, max 30 s</b></span><span class="chip">DLQs <b>DLQ.&lt;queue&gt;</b></span><span class="chip">API <b>/api/v1/ops/dlq</b></span></div>
+<h2>Flow</h2><div class="diagram"><pre class="mermaid">
+flowchart LR
+    Q[("sentinel.txn.ingested<br/>or sentinel.detection.hits")] --> C["Consumer<br/>transacted session"]
+    C -->|exception| RB["rollback"]
+    RB -->|"attempt 1..4: wait 1, 2, 4, 8 s"| Q
+    RB -->|"attempt 5 failed"| DLQ[("DLQ address<br/>queue DLQ.&lt;source queue&gt;")]
+    OPS["Operator"] -->|"GET /api/v1/ops/dlq/{queue}"| API["DeadLetterController"]
+    API --> SVC["DeadLetterService<br/>non-cached connection"]
+    SVC -->|browse| DLQ
+    SVC -->|"replay: receive + send<br/>in ONE transacted session"| Q
+    SVC -->|delete one| DLQ
+</pre><div class="caption">Policy lives in infra/artemis/broker.properties, mounted into the broker container.</div></div><h2>Step by step</h2><ol class="steps"><li>A listener throws (bad JSON, DB down, a bug). Because the session is transacted (<code>spring.jms.listener.session.transacted=true</code>) the message goes back to the broker.</li><li>The broker redelivers after 1, 2, 4 and 8 s (<code>redeliveryDelay</code> 1000, multiplier 2, max 30 s). Short outages heal on their own.</li><li>After the 5th failure the broker moves the message to queue <code>DLQ.&lt;source&gt;</code> on address <code>DLQ</code>, auto-created on first use, and stamps <code>_AMQ_ORIG_QUEUE</code>.</li><li><code>GET /api/v1/ops/dlq</code> shows the depth of each DLQ; <code>GET /api/v1/ops/dlq/{queue}</code> browses messages without consuming them.</li><li>After fixing the cause, <code>POST /{queue}/replay[?messageId=]</code> moves messages back. Receive and send share one transacted session, so a crash can neither lose nor duplicate a message. Broker-internal properties are dropped, so attempts restart at 1.</li><li>A message that can never succeed is removed with <code>DELETE /{queue}/messages/{messageId}</code>.</li><li>Local demo: <code>POST /{queue}/poison-test</code> sends an unreadable message (enabled by <code>sentinel.ops.poison-test-enabled</code>, local only).</li></ol><h2>Components</h2><div class="table-wrap"><table><thead><tr><th>Component</th><th>Kind</th><th>Responsibility</th></tr></thead><tbody><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/ops/DeadLetterController.java"><code>DeadLetterController</code></a><span class="path">detection-service/…/ops/DeadLetterController.java</span></td><td><span class="badge k-controller">Controller</span></td><td><code>/api/v1/ops/dlq</code> overview, browse, replay, delete, poison test</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/ops/DeadLetterService.java"><code>DeadLetterService</code></a><span class="path">detection-service/…/ops/DeadLetterService.java</span></td><td><span class="badge k-service">Service</span></td><td>JMS browse / transacted move; allow-list of queues</td></tr><tr><td><a href="../../services/common-lib/src/main/java/com/sentinel/aml/common/constants/MessagingConstants.java"><code>MessagingConstants</code></a><span class="path">common-lib/…/constants/MessagingConstants.java</span></td><td><span class="badge k-config">Config</span></td><td><code>DLQ_PREFIX</code>, <code>DLQ_ADDRESS</code></td></tr></tbody></table></div><h2>Data touched</h2><div class="table-wrap"><table><thead><tr><th>Store</th><th>Object</th><th>Access</th><th>When</th></tr></thead><tbody><tr><td>ActiveMQ</td><td><code>DLQ::DLQ.sentinel.txn.ingested</code></td><td><span class="badge b-rw">READ/WRITE</span></td><td>Browse, replay (consume), delete</td></tr><tr><td>ActiveMQ</td><td><code>DLQ::DLQ.sentinel.detection.hits</code></td><td><span class="badge b-rw">READ/WRITE</span></td><td>Same</td></tr><tr><td>ActiveMQ</td><td>source queues</td><td><span class="badge b-write">WRITE</span></td><td>Replayed messages</td></tr></tbody></table></div><h2>Broker policy (infra/artemis/broker.properties)</h2><pre class="code">addressSettings."sentinel.#".maxDeliveryAttempts=5
+addressSettings."sentinel.#".redeliveryDelay=1000
+addressSettings."sentinel.#".redeliveryMultiplier=2.0
+addressSettings."sentinel.#".maxRedeliveryDelay=30000
+addressSettings."sentinel.#".deadLetterAddress=DLQ
+addressSettings."sentinel.#".autoCreateDeadLetterResources=true
+addressSettings."sentinel.#".deadLetterQueuePrefix=DLQ.</pre><h2>Gotchas handled</h2><div class="table-wrap"><table><thead><tr><th>Gotcha</th><th>Handling</th></tr></thead><tbody><tr><td>Artemis default is redeliver immediately, forever</td><td>Policy above: bounded attempts + backoff</td></tr><tr><td>DLQ queue does not exist until the first dead letter</td><td>Treated as empty (depth 0), not an error</td></tr><tr><td>Spring's CachingConnectionFactory keeps consumers open; they can hold prefetched DLQ messages</td><td>DeadLetterService unwraps it and uses a fresh connection per call</td></tr><tr><td>Browsing does not count as delivery, so delivery count reads 0</td><td>Not shown; being in a DLQ already means 5 attempts were used</td></tr><tr><td>The API must not read arbitrary queues</td><td>Allow-list: only <code>sentinel.txn.ingested</code> and <code>sentinel.detection.hits</code> (400 otherwise)</td></tr></tbody></table></div>
+</main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/flows.js?v=3"></script>
+</body>
+</html>

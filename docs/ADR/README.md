@@ -13,11 +13,12 @@ For runtime flows (which class, table, Redis key and queue each step touches), o
 | [ADR-002](ADR-002-phase-2-data-model-and-customer-service.md) | 2 · Data model & customer-service | P2, (P17) | Flyway schema, AES-256-GCM PII converter, AOP tracing, one error envelope |
 | [ADR-003](ADR-003-phase-3-ingestion.md) | 3 · Ingestion | P3, P4, P5, P18, X1 | Idempotent REST + Spring Batch CSV → one factory → transactional outbox |
 | [ADR-004](ADR-004-phase-4-detection-engine.md) | 4 · Detection engine | P1, P6–P12, P15 | Strategy rules on atomic Lua windows, per-account perspective, probabilistic score |
+| [ADR-005](ADR-005-phase-5-alerts-dedup-and-resilience.md) | 5 · Alerts, de-dup, live rules, DLQ | P13, P14, P21, X2 | Race-free MySQL de-dup (50-thread test), topic hot reload after commit, broker backoff + DLQ replay |
 
 ```mermaid
 flowchart LR
-    A0[ADR-000<br/>Design] --> A1[ADR-001<br/>Platform] --> A2[ADR-002<br/>Customer] --> A3[ADR-003<br/>Ingestion] --> A4[ADR-004<br/>Detection] --> A5[ADR-005<br/>Alerts & de-dup<br/><i>next</i>]
-    style A5 stroke-dasharray: 5 5
+    A0[ADR-000<br/>Design] --> A1[ADR-001<br/>Platform] --> A2[ADR-002<br/>Customer] --> A3[ADR-003<br/>Ingestion] --> A4[ADR-004<br/>Detection] --> A5[ADR-005<br/>Alerts & de-dup] --> A6[ADR-006<br/>Security & audit<br/><i>next</i>]
+    style A6 stroke-dasharray: 5 5
 ```
 
 ## How each ADR is laid out

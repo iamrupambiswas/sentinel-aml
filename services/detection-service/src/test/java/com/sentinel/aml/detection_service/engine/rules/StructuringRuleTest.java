@@ -6,6 +6,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.Optional;
+import com.sentinel.aml.detection_service.engine.RuleHit;
+import com.sentinel.aml.detection_service.engine.TransactionContext;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 
 import static com.sentinel.aml.detection_service.support.Fixtures.*;
@@ -84,5 +89,71 @@ class StructuringRuleTest {
         rule.evaluate(first, cfg);
         rule.evaluate(first, cfg); // same txn again (JMS redelivery)
         assertThat(rule.evaluate(credit("770000", plus(Duration.ofHours(1))), cfg)).isEmpty();
+    }
+
+    // ---- out-of-order evaluation (ADR-005 §11): several consumer threads, one account ----
+
+    @Test
+    void four_deposits_evaluated_newest_first_still_fire() {
+        var d1 = credit("760000", T0);
+        var d2 = credit("780000", plus(Duration.ofHours(6)));
+        var d3 = credit("800000", plus(Duration.ofHours(13)));
+        var d4 = credit("830000", plus(Duration.ofHours(20)));
+        assertThat(rule.evaluate(d4, cfg)).isEmpty();
+        assertThat(rule.evaluate(d3, cfg)).isEmpty();
+        assertThat(rule.evaluate(d2, cfg).orElseThrow().evidenceTxnIds()).hasSize(3);
+        var last = rule.evaluate(d1, cfg).orElseThrow();
+        assertThat(last.evidenceTxnIds()).containsExactly(d1.transactionId(), d2.transactionId(),
+                d3.transactionId(), d4.transactionId());
+        assertThat(last.explanation()).contains("20 h 0 m");
+    }
+
+    @Test
+    void every_evaluation_order_gives_the_same_two_hits_as_in_order() {
+        List<List<Integer>> perms = permutations(List.of(0, 1, 2, 3));
+        for (List<Integer> order : perms) {
+            rule = new StructuringRule(new InMemorySlidingWindowStore());
+            List<TransactionContext> deposits = List.of(credit("760000", T0), credit("780000", plus(Duration.ofMinutes(1))),
+                    credit("800000", plus(Duration.ofMinutes(2))), credit("830000", plus(Duration.ofMinutes(3))));
+            List<RuleHit> hits = new ArrayList<>();
+            for (int i : order) rule.evaluate(deposits.get(i), cfg).ifPresent(hits::add);
+            assertThat(hits).as("order %s", order).hasSize(2);
+            assertThat(hits.get(1).evidenceTxnIds()).as("order %s", order).hasSize(4);
+        }
+    }
+
+    @Test
+    void late_deposit_sees_entries_a_newer_arrival_would_have_trimmed() {
+        rule.evaluate(credit("760000", T0), cfg);
+        rule.evaluate(credit("770000", plus(Duration.ofHours(12))), cfg);
+        assertThat(rule.evaluate(credit("775000", plus(Duration.ofHours(37))), cfg)).isEmpty(); // > 24h after T0
+        // arrives last, but happened at T0+6h: T0, T0+6h, T0+12h are 3 deposits within 24h
+        assertThat(rule.evaluate(credit("780000", plus(Duration.ofHours(6))), cfg)).isPresent();
+    }
+
+    @Test
+    void out_of_order_deposits_spread_over_more_than_the_window_do_not_fire() {
+        var a = credit("760000", T0);
+        var b = credit("770000", plus(Duration.ofHours(20)));
+        var c = credit("780000", plus(Duration.ofHours(40)));
+        assertThat(rule.evaluate(c, cfg)).isEmpty();
+        assertThat(rule.evaluate(a, cfg)).isEmpty();
+        assertThat(rule.evaluate(b, cfg)).isEmpty(); // any 24h window holds at most 2 of them
+    }
+
+    private static List<List<Integer>> permutations(List<Integer> items) {
+        if (items.isEmpty()) return List.of(List.of());
+        List<List<Integer>> out = new ArrayList<>();
+        for (Integer head : items) {
+            List<Integer> rest = new ArrayList<>(items);
+            rest.remove(head);
+            for (List<Integer> tail : permutations(rest)) {
+                List<Integer> p = new ArrayList<>();
+                p.add(head);
+                p.addAll(tail);
+                out.add(p);
+            }
+        }
+        return out;
     }
 }

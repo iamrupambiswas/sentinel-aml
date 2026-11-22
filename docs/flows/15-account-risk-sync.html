@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Account risk ratings to Redis · Sentinel AML flows</title>
+<link rel="stylesheet" href="assets/flows.css?v=3">
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" aria-label="Flow pages"></nav>
+<main>
+<div class="eyebrow">Customer</div>
+<h1>Account risk ratings to Redis</h1>
+<p class="lede">How customer-service publishes each account's effective risk rating so detection-service can apply the customer-risk multiplier to every score.</p>
+<div class="chips"><span class="chip">Owner <b>customer-service</b></span><span class="chip">Key <b>aml:acct-risk:{accountId}</b></span><span class="chip">Reader <b>detection CustomerRiskLookup</b></span></div>
+<h2>Flow</h2><div class="diagram"><pre class="mermaid">
+flowchart LR
+    API["PUT /api/v1/accounts/{id}/risk-rating<br/>PUT /api/v1/customers/{id}/risk-rating<br/>POST /api/v1/customers/{id}/accounts"] --> S["AccountService<br/>@Transactional"]
+    S --> DB[("customer_db<br/>customer, account")]
+    S -->|"registerSynchronization(afterCommit)"| P["AccountRiskPublisher"]
+    P -->|"pipelined SET"| R[("Redis<br/>aml:acct-risk:{accountId}")]
+    START["ApplicationReadyEvent<br/>POST /api/v1/admin/risk-sync<br/>after seed-data"] --> SY["AccountRiskSyncService.syncAll()<br/>pages of 500"]
+    SY --> DB
+    SY --> P
+    R --> D["detection CustomerRiskLookup<br/>LOW 1.0, MEDIUM 1.15, HIGH 1.3"]
+</pre></div><h2>Step by step</h2><ol class="steps"><li>Effective rating = the HIGHER of the customer's and the account's rating (<code>RiskRatings.effective</code>).</li><li>Opening an account (optionally with a chosen id such as <code>ACC-RAPID-01</code>) or changing a rating updates MySQL in one transaction.</li><li>The Redis write is registered as an <code>afterCommit</code> synchronization: a rolled-back change never reaches detection.</li><li>Changing a CUSTOMER's rating republishes every one of their accounts.</li><li><code>AccountRiskSyncService.syncAll()</code> pages through accounts (3-column projection, 500 per page, one pipelined Redis call per page). It runs at startup, after seeding and on demand.</li><li>detection-service reads the key per scored account; a missing key (other banks' accounts) means multiplier 1.0.</li></ol><h2>Components</h2><div class="table-wrap"><table><thead><tr><th>Component</th><th>Kind</th><th>Responsibility</th></tr></thead><tbody><tr><td><a href="../../services/customer-service/src/main/java/com/sentinel/aml/controller/AccountController.java"><code>AccountController</code></a><span class="path">customer-service/…/controller/AccountController.java</span></td><td><span class="badge k-controller">Controller</span></td><td>Accounts, ratings, customer view</td></tr><tr><td><a href="../../services/customer-service/src/main/java/com/sentinel/aml/service/AccountService.java"><code>AccountService</code></a><span class="path">customer-service/…/service/AccountService.java</span></td><td><span class="badge k-service">Service</span></td><td>Transactions + after-commit publish</td></tr><tr><td><a href="../../services/customer-service/src/main/java/com/sentinel/aml/risk/AccountRiskPublisher.java"><code>AccountRiskPublisher</code></a><span class="path">customer-service/…/risk/AccountRiskPublisher.java</span></td><td><span class="badge k-service">Service</span></td><td>Pipelined SET; after-commit hook</td></tr><tr><td><a href="../../services/customer-service/src/main/java/com/sentinel/aml/risk/AccountRiskSyncService.java"><code>AccountRiskSyncService</code></a><span class="path">customer-service/…/risk/AccountRiskSyncService.java</span></td><td><span class="badge k-job">Job</span></td><td>Full resync (startup / admin / after seed)</td></tr><tr><td><a href="../../services/customer-service/src/main/java/com/sentinel/aml/risk/RiskRatings.java"><code>RiskRatings</code></a><span class="path">customer-service/…/risk/RiskRatings.java</span></td><td><span class="badge k-service">Service</span></td><td>Effective rating rule</td></tr><tr><td><a href="../../services/common-lib/src/main/java/com/sentinel/aml/common/constants/RedisKeys.java"><code>RedisKeys</code></a><span class="path">common-lib/…/constants/RedisKeys.java</span></td><td><span class="badge k-config">Config</span></td><td>Shared key format</td></tr></tbody></table></div><h2>Data touched</h2><div class="table-wrap"><table><thead><tr><th>Store</th><th>Object</th><th>Access</th><th>When</th></tr></thead><tbody><tr><td>MySQL customer_db</td><td><code>customer</code>, <code>account</code></td><td><span class="badge b-rw">READ/WRITE</span></td><td>Rating changes, resync projection</td></tr><tr><td>Redis</td><td><code>aml:acct-risk:{accountId}</code></td><td><span class="badge b-write">WRITE</span></td><td>After commit; full resync</td></tr></tbody></table></div><h2>Score impact (measured)</h2><div class="table-wrap"><table><thead><tr><th>Account</th><th>Effective rating</th><th>Rules hit</th><th>Score</th></tr></thead><tbody><tr><td>ACC-CTR-01 (not registered)</td><td>none = 1.0</td><td>CTR (30)</td><td>30.00</td></tr><tr><td>ACC-RAPID-01</td><td>HIGH = 1.3</td><td>CTR (30)</td><td>39.00</td></tr><tr><td>ACC-RAPID-01</td><td>HIGH = 1.3</td><td>RAPID_MOVEMENT (75) + CTR (30) = 82.5</td><td>100.00 (capped)</td></tr></tbody></table></div>
+</main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/flows.js?v=3"></script>
+</body>
+</html>

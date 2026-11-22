@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live rule tuning & hot reload · Sentinel AML flows</title>
+<link rel="stylesheet" href="assets/flows.css?v=3">
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" aria-label="Flow pages"></nav>
+<main>
+<div class="eyebrow">Detection</div>
+<h1>Live rule tuning & hot reload</h1>
+<p class="lede">How a compliance officer changes a rule threshold through the API and every detection pod evaluates with the new value within milliseconds, with an audit trail and no lost updates.</p>
+<div class="chips"><span class="chip">Service <b>detection-service</b></span><span class="chip">Topic <b>sentinel.rules.changed</b></span><span class="chip">Measured <b>45 ms commit-to-live</b></span></div>
+<h2>Flow</h2><div class="diagram"><pre class="mermaid">
+sequenceDiagram
+    participant U as Compliance officer
+    participant API as RuleAdminController
+    participant S as RuleAdminService
+    participant DB as MySQL sentinel_detection
+    participant P as RuleChangePublisher
+    participant T as Topic sentinel.rules.changed
+    participant L as RulesChangedListener (every pod)
+    participant C as RuleCacheServiceImpl
+    U->>API: PUT /api/v1/rules/CTR_THRESHOLD {thresholdAmount, expectedVersion, changedBy, reason}
+    API->>S: update(code, request)
+    S->>DB: load aml_rule, check expectedVersion (409 if stale)
+    S->>DB: UPDATE aml_rule WHERE version = old (JPA @Version bumps it)
+    S->>DB: INSERT aml_rule_version (snapshot, who, why)
+    S-->>API: 200 saved as version N
+    Note over S,DB: COMMIT
+    DB-->>P: @TransactionalEventListener(AFTER_COMMIT)
+    P->>T: RulesChangedEvent(code, N, changedBy, changedAt)
+    T-->>L: one copy per subscribed pod
+    L->>C: refreshRuleCache() (atomic Map swap)
+    L->>L: log + metric commit-to-live lag
+</pre></div><h2>Step by step</h2><ol class="steps"><li><code>RuleAdminController</code> validates the body (<code>@Valid</code>: weight 0-100, non-negative numbers, reason and changedBy required).</li><li><code>RuleAdminService.update()</code> rejects a stale <code>expectedVersion</code> with 409, and unknown param names with 400 (each rule declares <code>supportedParams()</code>).</li><li>Changed fields are applied; <code>saveAndFlush</code> bumps the JPA <code>@Version</code>. A concurrent commit in between also gives 409.</li><li>A full snapshot is inserted into <code>aml_rule_version</code>, then an in-process <code>RuleChangedApplicationEvent</code> is raised.</li><li><code>RuleChangePublisher</code> runs only AFTER COMMIT and sends <code>RulesChangedEvent</code> to the TOPIC with the dedicated <code>topicJmsTemplate</code>.</li><li>Every detection pod's <code>RulesChangedListener</code> (topic factory, pub/sub) reloads the cache and records <code>sentinel_rule_reload_lag</code>.</li><li><code>GET /api/v1/rules</code> shows <code>version</code> (DB) next to <code>loadedVersion</code> (this pod) to prove the change is live.</li></ol><h2>Components</h2><div class="table-wrap"><table><thead><tr><th>Component</th><th>Kind</th><th>Responsibility</th></tr></thead><tbody><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/rules/RuleAdminController.java"><code>RuleAdminController</code></a><span class="path">detection-service/…/rules/RuleAdminController.java</span></td><td><span class="badge k-controller">Controller</span></td><td><code>/api/v1/rules</code> list, get, versions, PUT</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/rules/RuleAdminService.java"><code>RuleAdminService</code></a><span class="path">detection-service/…/rules/RuleAdminService.java</span></td><td><span class="badge k-service">Service</span></td><td>Optimistic lock, param validation, audit snapshot</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/rules/RuleChangePublisher.java"><code>RuleChangePublisher</code></a><span class="path">detection-service/…/rules/RuleChangePublisher.java</span></td><td><span class="badge k-listener">Listener</span></td><td>AFTER_COMMIT publish to the topic</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/rules/RulesChangedListener.java"><code>RulesChangedListener</code></a><span class="path">detection-service/…/rules/RulesChangedListener.java</span></td><td><span class="badge k-listener">Listener</span></td><td>Topic subscriber: reload + lag metric</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/config/JmsConfig.java"><code>JmsConfig</code></a><span class="path">detection-service/…/config/JmsConfig.java</span></td><td><span class="badge k-config">Config</span></td><td><code>topicListenerFactory</code>, <code>topicJmsTemplate</code>, @Primary queue template</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/entity/AmlRuleVersion.java"><code>AmlRuleVersion</code></a><span class="path">detection-service/…/entity/AmlRuleVersion.java</span></td><td><span class="badge k-entity">Entity</span></td><td>Insert-only snapshot</td></tr><tr><td><a href="../../services/detection-service/src/main/java/com/sentinel/aml/detection_service/engine/DetectionRule.java"><code>DetectionRule.supportedParams()</code></a><span class="path">detection-service/…/engine/DetectionRule.java</span></td><td><span class="badge k-config">Config</span></td><td>Allowed JSON param names per rule</td></tr><tr><td><a href="../../services/common-lib/src/main/java/com/sentinel/aml/common/event/RulesChangedEvent.java"><code>RulesChangedEvent</code></a><span class="path">common-lib/…/event/RulesChangedEvent.java</span></td><td><span class="badge k-service">DTO / Event</span></td><td>Topic message contract</td></tr></tbody></table></div><h2>Data touched</h2><div class="table-wrap"><table><thead><tr><th>Store</th><th>Object</th><th>Access</th><th>When</th></tr></thead><tbody><tr><td>MySQL sentinel_detection</td><td><code>aml_rule</code></td><td><span class="badge b-rw">READ/WRITE</span></td><td>Load, versioned update</td></tr><tr><td>MySQL sentinel_detection</td><td><code>aml_rule_version</code></td><td><span class="badge b-write">WRITE</span></td><td>One snapshot per change (V6 baselined every rule as v1)</td></tr><tr><td>ActiveMQ</td><td>topic <code>sentinel.rules.changed</code></td><td><span class="badge b-rw">READ/WRITE</span></td><td>Publish after commit; every pod subscribes</td></tr><tr><td>JVM memory</td><td><code>RuleCacheServiceImpl.rules</code></td><td><span class="badge b-write">WRITE</span></td><td>Atomic volatile swap</td></tr></tbody></table></div><h2>Why these choices</h2><div class="table-wrap"><table><thead><tr><th>Choice</th><th>Alternative</th><th>Why</th></tr></thead><tbody><tr><td>Topic (pub/sub)</td><td>Queue</td><td>A queue delivers to ONE pod; every pod must reload</td></tr><tr><td>Publish AFTER_COMMIT</td><td>Publish inside the transaction</td><td>A fast pod could reload before commit and read the old row</td></tr><tr><td>Non-durable subscription</td><td>Durable subscriber per pod</td><td>A pod that was down loads all rules from MySQL at startup anyway</td></tr><tr><td>Explicit @Primary queue JmsTemplate</td><td>Rely on Boot's auto-config</td><td>Boot drops its JmsTemplate once any JmsTemplate bean exists; hits would go to a topic</td></tr><tr><td>5-min scheduled refresh kept</td><td>Topic only</td><td>Safety net if a broadcast is lost</td></tr></tbody></table></div>
+</main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/flows.js?v=3"></script>
+</body>
+</html>

@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -42,6 +43,11 @@ public class AmlRule {
     @Column(columnDefinition = "JSON")
     private String params;
 
+    /**
+     * Optimistic lock (P13): Hibernate bumps it on every update and rejects a write based on a
+     * stale copy. Also the version number shown in RuleConfig and in aml_rule_version.
+     */
+    @Version
     @Column(nullable = false)
     private int version;
 }
