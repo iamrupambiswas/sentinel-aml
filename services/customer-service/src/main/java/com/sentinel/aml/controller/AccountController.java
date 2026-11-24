@@ -18,7 +18,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Accounts and risk ratings (Phase 5). Phase 6: KYC / SUPERVISOR roles for rating changes. */
+/** Accounts and risk ratings (Phase 5). Rating changes need SENIOR_ANALYST (config/SecurityRoutes). */
 @RestController
 @RequiredArgsConstructor
 public class AccountController {

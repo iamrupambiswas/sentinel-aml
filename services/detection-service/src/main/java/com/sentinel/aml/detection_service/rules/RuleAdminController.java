@@ -15,9 +15,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.security.Principal;
 import java.util.List;
 
-/** Rule admin API (P13). Phase 6: RULE_ADMIN role only, and changedBy comes from the JWT. */
+/** Rule admin API (P13). Reads need ANALYST, changes need ADMIN (config/SecurityRoutes); changedBy is the JWT username. */
 @RestController
 @RequestMapping(ApiRoutes.RULES)
 @RequiredArgsConstructor
@@ -43,8 +44,9 @@ public class RuleAdminController {
 
     @PutMapping("/{code}")
     public ResponseEntity<ApiResponse<RuleView>> update(@PathVariable("code") String code,
-                                                        @Valid @RequestBody RuleUpdateRequest request) {
-        RuleView view = ruleAdminService.update(code, request);
+                                                        @Valid @RequestBody RuleUpdateRequest request,
+                                                        Principal principal) {
+        RuleView view = ruleAdminService.update(code, request, principal.getName());
         return ok(view, "Rule " + code + " saved as version " + view.version()
                 + "; broadcast on sentinel.rules.changed, live on all pods in seconds");
     }

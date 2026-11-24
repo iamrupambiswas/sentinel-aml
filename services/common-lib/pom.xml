@@ -28,6 +28,11 @@
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
         </dependency>
+        <!-- Every service is an OAuth2 resource server: validates Keycloak JWTs (Phase 6, P17/P19) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+        </dependency>
         <!-- Optional: only services that do messaging pull in JMS; common-lib just offers the shared converter -->
         <dependency>
             <groupId>org.springframework</groupId>

@@ -9,7 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 
-/** Operational endpoints. Phase 6: restrict to RULE_ADMIN. Rule CRUD lives in rules.RuleAdminController (P13). */
+/** Operational endpoints. ADMIN only (config/SecurityRoutes). Rule CRUD lives in rules.RuleAdminController (P13). */
 @RestController
 @RequiredArgsConstructor
 public class DetectionAdminController {
