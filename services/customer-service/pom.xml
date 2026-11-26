@@ -26,6 +26,11 @@
             <artifactId>common-lib</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- Phase 7b: audit events go to the sentinel.audit.events queue -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-artemis</artifactId>
+        </dependency>
 
         <!-- Service-Specific Database Tools -->
         <dependency>

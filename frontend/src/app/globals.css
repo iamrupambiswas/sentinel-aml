@@ -1,0 +1,326 @@
+@import "tailwindcss";
+
+/*
+ * Sentinel console design system.
+ * Charcoal neutrals, one deep-teal brand accent, and colour reserved for meaning: red = high risk / destructive,
+ * amber = medium risk / in progress, green = healthy / done. Themes are CSS variables, switched by
+ * <html data-theme="light|dark"> (explicit choice) or the OS setting (no attribute = system).
+ */
+
+@theme {
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, Menlo, monospace;
+
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-brand: var(--brand);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-soft: var(--brand-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+
+  --shadow-card: 0 1px 2px rgb(16 24 32 / 0.04), 0 1px 1px rgb(16 24 32 / 0.03);
+  --shadow-pop: 0 12px 32px -8px rgb(16 24 32 / 0.22), 0 2px 6px rgb(16 24 32 / 0.08);
+
+  --animate-rise: rise 0.32s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-shimmer: shimmer 1.4s ease-in-out infinite;
+  --animate-ping-slow: ping-slow 2.2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+/* ---------- light (default) ---------- */
+:root {
+  color-scheme: light;
+  --canvas: #f4f5f4;
+  --surface: #ffffff;
+  --raised: #ffffff;
+  --sunken: #eef0ef;
+  --line: #e1e4e2;
+  --line-strong: #c9cecb;
+  --ink: #16191b;
+  --ink-2: #3b4246;
+  --muted: #697176;
+  --brand: #0f6b62;          /* deep teal */
+  --brand-ink: #ffffff;
+  --brand-soft: #e3f1ee;
+  --danger: #b42318;
+  --danger-soft: #fdeceb;
+  --warn: #9a5b00;
+  --warn-soft: #fdf3e2;
+  --ok: #1f7a3f;
+  --ok-soft: #e6f4eb;
+  --info: #2457a6;
+  --info-soft: #e8eef9;
+  --grid-dot: rgb(22 25 27 / 0.07);
+  --sidebar: #16191b;
+  --sidebar-ink: #c9cfcc;
+  --sidebar-muted: #7b8580;
+  --sidebar-line: #262b2e;
+  --sidebar-active: #22282b;
+}
+
+/* ---------- dark: explicit choice ---------- */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #0e1112;
+  --surface: #151a1b;
+  --raised: #1a2021;
+  --sunken: #111516;
+  --line: #242b2d;
+  --line-strong: #344043;
+  --ink: #e7ebe9;
+  --ink-2: #c3cac7;
+  --muted: #8b9592;
+  --brand: #3fb5a5;
+  --brand-ink: #06231f;
+  --brand-soft: #12302c;
+  --danger: #f07c70;
+  --danger-soft: #361a18;
+  --warn: #e8b45c;
+  --warn-soft: #33270f;
+  --ok: #67c58a;
+  --ok-soft: #12291b;
+  --info: #7fa7e8;
+  --info-soft: #172338;
+  --grid-dot: rgb(231 235 233 / 0.05);
+  --sidebar: #0a0c0d;
+  --sidebar-ink: #c9cfcc;
+  --sidebar-muted: #6f7976;
+  --sidebar-line: #1b2022;
+  --sidebar-active: #171c1e;
+}
+
+/* ---------- dark: follow the OS when no explicit choice ---------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --canvas: #0e1112;
+    --surface: #151a1b;
+    --raised: #1a2021;
+    --sunken: #111516;
+    --line: #242b2d;
+    --line-strong: #344043;
+    --ink: #e7ebe9;
+    --ink-2: #c3cac7;
+    --muted: #8b9592;
+    --brand: #3fb5a5;
+    --brand-ink: #06231f;
+    --brand-soft: #12302c;
+    --danger: #f07c70;
+    --danger-soft: #361a18;
+    --warn: #e8b45c;
+    --warn-soft: #33270f;
+    --ok: #67c58a;
+    --ok-soft: #12291b;
+    --info: #7fa7e8;
+    --info-soft: #172338;
+    --grid-dot: rgb(231 235 233 / 0.05);
+    --sidebar: #0a0c0d;
+    --sidebar-ink: #c9cfcc;
+    --sidebar-muted: #6f7976;
+    --sidebar-line: #1b2022;
+    --sidebar-active: #171c1e;
+  }
+}
+
+html,
+body {
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+body {
+  font-feature-settings: "ss02", "tnum" 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Faint dot grid behind content: structure without decoration */
+.canvas-grid {
+  background-image: radial-gradient(var(--grid-dot) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+::selection {
+  background: var(--brand-soft);
+}
+
+/* ---------- motion ---------- */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+@keyframes ping-slow {
+  0% { transform: scale(1); opacity: 0.55; }
+  80%, 100% { transform: scale(2.4); opacity: 0; }
+}
+@keyframes draw {
+  to { stroke-dashoffset: 0; }
+}
+
+/* Page content rises in, children staggered a little */
+.page > * { animation: var(--animate-rise); }
+.page > *:nth-child(2) { animation-delay: 40ms; }
+.page > *:nth-child(3) { animation-delay: 80ms; }
+.page > *:nth-child(4) { animation-delay: 120ms; }
+.page > *:nth-child(n + 5) { animation-delay: 160ms; }
+
+/* Notices: drop in from the top on desktop, rise from the bottom on phones; slide out to the right */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-10px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes toast-in-up {
+  from { opacity: 0; transform: translateY(14px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes toast-out {
+  to { opacity: 0; transform: translateX(28px) scale(0.97); }
+}
+@keyframes countdown {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+.toast-enter { animation: toast-in 0.34s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.toast-leave { animation: toast-out 0.22s cubic-bezier(0.4, 0, 1, 1) forwards; }
+@media (max-width: 639px) {
+  .toast-enter { animation-name: toast-in-up; }
+}
+/* The countdown is the toast's timer: hover or keyboard focus pauses it */
+.toast-timer {
+  transform-origin: left;
+  opacity: 0.75;
+  animation: countdown var(--toast-ms, 6s) linear forwards;
+}
+.toast:hover .toast-timer,
+.toast:focus-within .toast-timer {
+  animation-play-state: paused;
+}
+
+/* Spinner */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spin { animation: spin 0.7s linear infinite; }
+
+/* Skeletons fade in after a beat, so fast pages never flash a placeholder */
+.loading-in { animation: rise 0.3s ease-out 120ms both; }
+
+/* Error pages: a slow sweep across the illustration, and a gentle float */
+@keyframes sweep {
+  0% { transform: translateX(-100%); opacity: 0; }
+  15%, 85% { opacity: 1; }
+  100% { transform: translateX(500%); opacity: 0; }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+.sweep { animation: sweep 4.5s ease-in-out infinite; }
+.float { animation: float 5s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  /* still a timer, just not a moving one */
+  .toast-timer {
+    animation-duration: var(--toast-ms, 6s) !important;
+    visibility: hidden;
+  }
+}
+
+/* ---------- components ---------- */
+@layer components {
+  .card {
+    @apply rounded-xl border border-line bg-surface shadow-card;
+  }
+  .card-head {
+    @apply flex items-center justify-between gap-3 border-b border-line px-4 py-3;
+  }
+  .card-title {
+    @apply text-[13px] font-semibold tracking-tight text-ink;
+  }
+  .eyebrow {
+    @apply text-[11px] font-medium uppercase tracking-[0.08em] text-muted;
+  }
+
+  .btn {
+    @apply inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-line-strong bg-surface px-3 text-[13px] font-medium text-ink
+      transition-[background-color,border-color,box-shadow,transform] duration-150 hover:bg-sunken active:translate-y-px
+      disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply border-brand bg-brand text-brand-ink hover:bg-brand hover:brightness-110;
+  }
+  .btn-danger {
+    @apply border-danger/50 text-danger hover:border-danger hover:bg-danger-soft;
+  }
+  .btn-ghost {
+    @apply border-transparent bg-transparent shadow-none hover:bg-sunken;
+  }
+  .btn-lg {
+    @apply h-10 px-4 text-sm;
+  }
+
+  .input {
+    @apply h-9 w-full rounded-lg border border-line-strong bg-surface px-3 text-[13px] text-ink transition-[border-color,box-shadow] duration-150
+      placeholder:text-muted hover:border-ink/30 focus:border-brand focus:outline-none focus:ring-3 focus:ring-brand/15;
+  }
+  textarea.input {
+    @apply h-auto py-2;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-medium text-ink-2;
+  }
+
+  .table {
+    @apply w-full border-collapse text-[13px];
+  }
+  .th {
+    @apply sticky top-0 border-b border-line bg-sunken/60 px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.06em] text-muted;
+  }
+  .td {
+    @apply border-b border-line px-4 py-3 align-top;
+  }
+  .row {
+    @apply transition-colors duration-100 hover:bg-sunken/70;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-medium;
+  }
+  .kbd {
+    @apply rounded border border-line bg-sunken px-1 font-mono text-[11px] text-ink-2;
+  }
+
+  .skeleton {
+    @apply rounded-md;
+    background: linear-gradient(90deg, var(--sunken) 0px, var(--line) 160px, var(--sunken) 320px);
+    background-size: 800px 100%;
+    animation: var(--animate-shimmer);
+  }
+}

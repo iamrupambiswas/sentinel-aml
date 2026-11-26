@@ -5,11 +5,14 @@ import com.sentinel.aml.entity.Customer;
 import com.sentinel.aml.enums.RiskRating;
 import com.sentinel.aml.repository.CustomerRepository;
 import com.sentinel.aml.service.CustomerProfileService;
+import com.sentinel.aml.common.audit.AuditPublisher;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset; // all services store UTC; the console shows local time
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -17,6 +20,7 @@ import java.util.UUID;
 public class CustomerProfileServiceImpl implements CustomerProfileService {
 
     private final CustomerRepository customerRepository;
+    private final AuditPublisher audit;
 
     @Override
     @Transactional
@@ -29,9 +33,13 @@ public class CustomerProfileServiceImpl implements CustomerProfileService {
                 .dob(request.dob())
                 .nationality(request.nationality())
                 .riskRating(RiskRating.MEDIUM)
-                .onboardedAt(LocalDateTime.now())
+                .onboardedAt(LocalDateTime.now(ZoneOffset.UTC))
                 .build();
 
-        return customerRepository.save(customer);
+        Customer saved = customerRepository.save(customer);
+        // No PII in audit details: the type and nationality are enough to find the record
+        audit.record("CUSTOMER_ONBOARDED", "CUSTOMER", saved.getId(),
+                Map.of("type", String.valueOf(saved.getType()), "nationality", String.valueOf(saved.getNationality())));
+        return saved;
     }
 }

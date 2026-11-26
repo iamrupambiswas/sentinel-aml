@@ -45,7 +45,7 @@ public class DeadLetterService {
 
     /** Only our own queues; the API must not become a generic "read any queue" endpoint. */
     public static final Set<String> SOURCE_QUEUES = Set.of(
-            MessagingConstants.TRANSACTION_QUEUE, MessagingConstants.DETECTION_HITS_QUEUE);
+            MessagingConstants.TRANSACTION_QUEUE, MessagingConstants.DETECTION_HITS_QUEUE, MessagingConstants.AUDIT_QUEUE);
 
     private static final int MAX_BODY = 4000;
     private static final long RECEIVE_TIMEOUT_MS = 500;

@@ -1,0 +1,10 @@
+# Build output and IDE files never go into the image build context (the image compiles from source)
+**/target
+**/.idea
+**/*.iml
+**/.vscode
+**/.DS_Store
+**/HELP.md
+**/mvnw
+**/mvnw.cmd
+**/.mvn

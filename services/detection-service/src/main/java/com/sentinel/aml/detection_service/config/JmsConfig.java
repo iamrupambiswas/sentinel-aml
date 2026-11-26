@@ -2,6 +2,7 @@ package com.sentinel.aml.detection_service.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sentinel.aml.common.messaging.SentinelMessageConverters;
+import com.sentinel.aml.common.audit.AuditPublisher;
 import jakarta.jms.ConnectionFactory;
 import org.springframework.boot.autoconfigure.jms.DefaultJmsListenerContainerFactoryConfigurer;
 import org.springframework.context.annotation.Bean;
@@ -59,6 +60,12 @@ public class JmsConfig {
         template.setMessageConverter(converter);
         template.setPubSubDomain(true);
         return template;
+    }
+
+    /** Phase 7b: rule changes and DLQ operations go to the shared audit log (queue template). */
+    @Bean
+    public AuditPublisher auditPublisher(JmsTemplate jmsTemplate) {
+        return new AuditPublisher(jmsTemplate, "detection-service");
     }
 
     @Bean

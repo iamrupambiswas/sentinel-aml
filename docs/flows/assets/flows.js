@@ -19,7 +19,9 @@
       ["10-rule-config-and-baseline.html", "Rule config, watchlist & baseline"],
       ["13-rule-hot-reload.html", "Live rule tuning & hot reload"] ] },
     { group: "Alerts", items: [
-      ["12-alert-dedup.html", "Alert de-duplication & workflow"] ] },
+      ["12-alert-dedup.html", "Alert de-duplication & workflow"],
+      ["17-analyst-console.html", "Analyst console & live alerts"],
+      ["18-cases-and-audit.html", "Cases, audit trail & PII"] ] },
     { group: "Security", items: [
       ["16-authentication-and-roles.html", "Authentication & roles (Keycloak JWT)"] ] },
     { group: "Operations", items: [
@@ -41,7 +43,7 @@
   // ---- sidebar ----
   const side = document.querySelector(".sidebar");
   if (side) {
-    let html = '<div class="brand">Sentinel AML</div><div class="brand-sub">Flow documentation &middot; Phases 0&ndash;6</div>';
+    let html = '<div class="brand">Sentinel AML</div><div class="brand-sub">Flow documentation &middot; Phases 0&ndash;7b</div>';
     for (const g of PAGES) {
       html += "<h4>" + g.group + "</h4>";
       for (const [href, label] of g.items) {

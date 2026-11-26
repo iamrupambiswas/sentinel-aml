@@ -1,10 +1,14 @@
-# Manual run & test guide (Phases 1–6)
+# Manual run & test guide (Phases 1–7b)
 
-Everything here is done by hand: Docker Compose, one terminal per service, Postman for the API, and Adminer, `mysql`, `redis-cli`, the Artemis console and the service logs to see what happened inside.
+> **New here? Start with [GETTING-STARTED.md](GETTING-STARTED.md)**: the short, step-by-step way to run everything and take a tour. This guide is the detailed reference: what to check in each folder, SQL, Redis and broker queries.
+
+Everything here is done by hand: the infrastructure in Docker Compose, one terminal per service, Postman for the API, and Adminer, `mysql`, `redis-cli`, the Artemis console and the service logs to see what happened inside.
+
+> **Just want it running?** `docker compose up -d --build` starts the infrastructure, all five services and the console in containers, replacing sections 1–3 ([GETTING-STARTED.md](GETTING-STARTED.md)). Every check from section 4 on works the same against the containers: same ports, same databases. Service logs: `docker compose logs -f <service>`.
 
 ```mermaid
 flowchart LR
-    S1["1. docker compose up"] --> S2["2. mvn install"] --> S3["3. start 5 services<br/>(5 terminals)"] --> S4["4. health checks"] --> S5["5. Postman<br/>folders 00 → 08"] --> S6["6. verify in<br/>MySQL · Redis · Artemis · logs"]
+    S1["1. docker compose up<br/>(infrastructure)"] --> S2["2. mvn install"] --> S3["3. start 5 services<br/>(5 terminals)"] --> S4["4. health checks"] --> S5["5. Postman<br/>folders 00 → 08"] --> S6["6. verify in<br/>MySQL · Redis · Artemis · logs"]
 ```
 
 ---
@@ -23,16 +27,18 @@ flowchart LR
 
 ## 1. Start the infrastructure
 
-From the repository root:
+From the repository root, start **only the infrastructure** (a plain `docker compose up` would also start the services in containers, on the same ports you're about to use):
 
 ```bash
-docker compose up -d
+docker compose up -d infra
 ```
+
+It returns when MySQL, Redis, Artemis and Keycloak are healthy (Adminer and RedisInsight start too). `sentinel-infra-ready` showing `Exited (0)` is expected: it's a placeholder that only waits for them.
 ```bash
 docker compose ps
 ```
 
-Wait until **mysql**, **redis** and **activemq** show `(healthy)` (≈ 20–40 s on first start; the first run also downloads the RedisInsight image). Keycloak, Adminer and RedisInsight have no healthcheck.
+Wait until **mysql**, **redis**, **activemq** and **keycloak** show `(healthy)` (≈ 30–60 s on first start; the first run also downloads the images). Adminer and RedisInsight have no healthcheck.
 
 | Container | Web UI | Login |
 |---|---|---|
@@ -94,6 +100,24 @@ java -jar gateway-service/target/gateway-service-1.0.0-SNAPSHOT.jar
 
 Alternatives: `mvn -pl customer-service spring-boot:run` from `services/`, or run each `*Application` class from IntelliJ.
 
+### 3.1 Start the analyst console (Phase 7)
+
+Needs Node.js 20+. Once:
+```bash
+cd frontend && cp .env.example .env.local
+```
+Put a real secret in `NEXTAUTH_SECRET` inside `.env.local` (generate one with `openssl rand -base64 32`). Then:
+```bash
+cd frontend && npm install
+```
+**Terminal 6: console (:3000)**
+```bash
+cd frontend && npm run dev
+```
+Open http://localhost:3000 and sign in as `analyst1` / `senior1` / `admin1` (password = username).
+
+> If your Keycloak container is older than Phase 7 it has no `sentinel-console` client (the realm import skips an existing realm) and login fails with *invalid client*. Recreate it once: `docker compose up -d --force-recreate keycloak`.
+
 ### What a healthy startup looks like in each terminal
 
 | Service | Log lines to look for |
@@ -116,7 +140,7 @@ In Adminer you should now see four databases: `customer_db`, `ingestion_db`, `se
    - `Sentinel-AML.postman_collection.json`
    - `Sentinel-AML-local.postman_environment.json`
 2. Top-right environment dropdown → **Sentinel AML – Local** (`baseUrl = http://localhost:8080`, the gateway).
-3. Run the folders **in order**: `00 → 01 → … → 09` (05–08 are Phase 5, 09 is Phase 6). Since Phase 6 every API call needs a Keycloak JWT: the collection logs in as `admin1` by itself before the first request and refreshes the token before it expires, so Keycloak must be up.
+3. Run the folders **in order**: `00 → 01 → … → 11` (05–08 are Phase 5, 09 is Phase 6, 10 is Phase 7, 11 is Phase 7b). A full run is 125 requests and 208 assertions. Since Phase 6 every API call needs a Keycloak JWT: the collection logs in as `admin1` by itself before the first request and refreshes the token before it expires, so Keycloak must be up.
    - **To call routes as a specific user**, open the first folder **Auth - get a token** and send `Get token: analyst1` (or `senior1`, the ingest client, `admin1`). The token is saved to `{{accessToken}}`, which every request sends, so any route you open next runs as that user. The test result shows the user and roles; copy `access_token` from the response to use it in curl or Swagger. Send `Get token: admin1` again before running folders 01–08. Every request has:
    - a **Tests** tab with assertions (green/red in the response panel),
    - a **Docs/description** with the exact SQL / redis-cli / log line to verify it.
@@ -401,6 +425,64 @@ curl -s -H "Authorization: Bearer $TOKEN" "localhost:8080/api/v1/alerts?size=5"
 ```
 Health and Swagger UI stay open; Swagger's "Try it out" needs a token pasted into the request headers.
 
+### 6.7 Folder 10 and the console (Phase 7)
+
+**Folder 10: gateway limits.**
+
+| # | Request | Expect |
+|---|---|---|
+| 1 | Any authenticated call | 200 with `X-RateLimit-Limit: 100` and `X-RateLimit-Remaining` |
+| 2 | 1.2 MB JSON body | 413 from the gateway (`Request body too large`), before authentication |
+
+A 429 needs a burst faster than the 20/s refill, which Postman's one-at-a-time runner never reaches. With a token in `$T` (see 6.6):
+```bash
+seq 1 250 | xargs -P 25 -I{} curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $T" localhost:8080/api/v1/alerts/stats | sort | uniq -c
+```
+Expect about 100–110 × `200` and the rest `429`. The 429 body says when to retry, and `Retry-After` is set. Another user is unaffected: buckets are per caller (`rl:sub:<jwt subject>` in Redis).
+
+**Live alerts without the console:**
+```bash
+curl -N -H "Authorization: Bearer $T" localhost:8080/api/v1/alerts/stream
+```
+You get `event:connected`, a `:keep-alive` comment every 25 s, and an `event:alert` line within about a second of any transaction that creates or adds to an alert.
+
+**Console walkthrough** (http://localhost:3000):
+
+| Step | Expect |
+|---|---|
+| Open any page signed out | Redirect to `/login`; after Keycloak login you land on the page you asked for |
+| Dashboard as `analyst1` | Open/total alerts, hits per alert, top new alerts; no *Dead letters* link |
+| Post a CTR transaction (Postman or curl) while the dashboard is open | A *New alert* notice top-right and updated numbers, no reload; header shows **Live** |
+| Open the alert → note → *Move to Under review* | Green banner; status, version and note updated; a *Status changed* notice |
+| `/rules` as `analyst1` | Read-only; thresholds in each rule's unit |
+| `/ops` as `analyst1` | "Dead-letter operations need the ADMIN role." |
+| Sign out | Keycloak asks to confirm, then back to `/login`; signing in again asks for the password |
+| `/rules/CTR_THRESHOLD` as `admin1` → change weight, give a reason | Saved as the next version, history shows `admin1`, state *Live* |
+| `/ops` as `admin1` after a poison test | Message body, *Replay* / *Delete* |
+
+### 6.8 Folder 11: cases, audit trail, PII (Phase 7b)
+
+| # | Request | Expect |
+|---|---|---|
+| 1 | Onboard a customer (admin) | 201, `idNumberMasked` like `*********234Z` |
+| 2–4 | Reveal national ID as analyst / senior without reason / senior with reason | 403 / 400 / 200 with the full value |
+| 5–6 | CTR transaction on a fresh account, then find its alert | 202, then one `CTR_THRESHOLD` alert |
+| 7–9 | Analyst opens a case; alert shows `caseId`; same alert in a second case | 201 / 200 / 409 |
+| 10–11 | Close as analyst / as senior with a resolution | 403 / 200, history starts with `CASE_CLOSED` by senior1 |
+| 12–14 | Audit as analyst / senior / verify as admin | 403 / reveal and onboarding listed / `valid: true` |
+| 15 | `GET /v3/api-docs/alert-case` through the gateway, no token | 200, documents `/api/v1/cases`, server = gateway |
+
+```sql
+SELECT seq, actor, action, entity_type, entity_id, LEFT(hash, 12) AS hash FROM alert_case_db.audit_event ORDER BY seq DESC LIMIT 10;
+SELECT * FROM alert_case_db.audit_chain_head;
+UPDATE alert_case_db.audit_event SET actor = 'x' WHERE seq = 1;   -- fails: "audit_event is append-only"
+SELECT id, title, status, priority, assignee FROM alert_case_db.aml_case ORDER BY id DESC;
+```
+
+The customer-service log line for `registerCustomer` now shows `idNumber=***`.
+
+**Combined API reference:** http://localhost:8080/swagger-ui.html: pick a service at the top right, click **Authorize**, paste an access token.
+
 ---
 
 ## 7. Troubleshooting
@@ -409,6 +491,14 @@ Health and Swagger UI stay open; Swagger's "Try it out" needs a token pasted int
 |---|---|---|
 | `Port 8080 was already in use` | Keycloak from an old compose config, or a previous service still running | `docker compose up -d` (recreates Keycloak on 8180); `lsof -nP -iTCP:8080 -sTCP:LISTEN` then stop that PID |
 | `sentinel-activemq` exits right after start with `./etc/login.config (Permission denied)`; services log `AMQ219007: Cannot connect to server(s)` | Fresh `artemis-data` volume plus the old compose mount, which created `etc/` as root | Use the current `docker-compose.yml`. If the volume was already half-created: `docker run --rm -v sentinel-aml_artemis-data:/v alpine sh -c 'rm -f /v/etc/broker.properties && chown 1001:1001 /v/etc'`, then `docker compose up -d activemq` |
+| Console login fails with *invalid client* or *invalid redirect uri* | Keycloak container created before Phase 7 (no `sentinel-console` client) | `docker compose up -d --force-recreate keycloak` |
+| Console shows "Could not reach the API" | Gateway (8080) not running, or `GATEWAY_URL` wrong in `frontend/.env.local` | Start the gateway; check the env file |
+| Header stays on *Connecting…* | alert-case-service down, or the gateway is older than Phase 7 (SSE buffered) | Start alert-case; rebuild the services (Spring Cloud 2023.0.6) |
+| Console pages return 500 after running `npm run build` | `build` and `dev` share `frontend/.next`; the build overwrote the dev server's files | Stop `npm run dev`, `rm -rf frontend/.next`, start it again |
+| Many `429 Too Many Requests` during your own scripts | The gateway rate limit (burst 100, 20/s per user) | Slow down, or raise `RATE_LIMIT_CAPACITY` / `RATE_LIMIT_REFILL_PER_SECOND` for the gateway |
+| Audit trail misses events from customer or detection | They travel over `sentinel.audit.events`; alert-case was down, or they are in its DLQ | Start alert-case; on **Dead letters** (admin) replay `sentinel.audit.events` |
+| alert-case fails on start: `You do not have the SUPER privilege and binary logging is enabled` | The V2 migration creates triggers; your DB user isn't root | Run migrations as root, or start MySQL with `--log-bin-trust-function-creators=1` |
+| Console in Docker: sign-in loops or `issuer mismatch` | Keycloak started without the Phase 7b flags | `docker compose up -d keycloak` (recreates it with `--hostname-url`) |
 | Every API call returns 401, or Postman logs `Keycloak token request failed` | Keycloak not up yet, or the container predates Phase 6 and has no `sentinel` realm | `docker compose up -d keycloak` (recreates it with the realm import; first start takes ~30 s), then check http://localhost:8180/realms/sentinel |
 | `Public Key Retrieval is not allowed` | MySQL 8 auth | already handled by `allowPublicKeyRetrieval=true` in the JDBC URL. Check you're running the latest build |
 | `Schema-validation: missing table` | Flyway didn't run | rebuild (`mvn clean install -DskipTests`); detection needs the flyway dependency (present since commit 5f27921) |

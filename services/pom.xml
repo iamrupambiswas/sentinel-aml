@@ -22,8 +22,8 @@
 
     <properties>
         <java.version>21</java.version>
-        <spring-boot.version>3.2.5</spring-boot.version>
-        <spring-cloud.version>2023.0.1</spring-cloud.version>
+        <spring-boot.version>3.2.12</spring-boot.version> <!-- 3.2.12: Spring 6.1.15, required by gateway MVC 4.1.9 (SSE streaming) -->
+        <spring-cloud.version>2023.0.6</spring-cloud.version> <!-- 2023.0.6: gateway MVC 4.1.9 flushes streamed (SSE) responses; 4.1.2 buffered them forever -->
         <testcontainers.version>1.21.4</testcontainers.version><!-- 1.21.4+ speaks Docker 29's minimum API (1.40) -->
         <mapstruct.version>1.5.5.Final</mapstruct.version>
         <lombok.version>1.18.32</lombok.version>

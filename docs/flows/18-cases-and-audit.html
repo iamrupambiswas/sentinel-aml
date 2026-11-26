@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cases, audit trail & PII · Sentinel AML flows</title>
+<link rel="stylesheet" href="assets/flows.css?v=3">
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" aria-label="Flow pages"></nav>
+<main>
+<div class="eyebrow">Alerts</div>
+<h1>Cases, audit trail & PII</h1>
+<p class="lede">How analysts group alerts into cases, how every decision from every service ends up in one tamper-evident log, and how the national ID is protected (Phase 7b, ADR-008).</p>
+<div class="chips"><span class="chip">Owner <b>alert-case-service</b></span><span class="chip">Queue <b>sentinel.audit.events</b></span><span class="chip">Chain <b>SHA-256, append-only</b></span><span class="chip">PII <b>reveal = SENIOR_ANALYST + reason</b></span></div>
+<h2>Flow</h2><div class="diagram"><pre class="mermaid">
+flowchart LR
+    CS["customer-service<br/>CUSTOMER_ONBOARDED, ACCOUNT_OPENED,<br/>*_RISK_CHANGED, PII_REVEALED"] -->|"AuditPublisher, after commit"| Q[["sentinel.audit.events"]]
+    DS["detection-service<br/>RULE_CHANGED, DLQ_REPLAYED,<br/>DLQ_MESSAGE_DELETED"] -->|"AuditPublisher, after commit"| Q
+    Q --> CON["AuditEventConsumer"]
+    CON --> LOG["AuditLog.append()"]
+    AC["alert-case-service<br/>ALERT_STATUS_CHANGED, CASE_*"] -->|"same DB transaction"| LOG
+    LOG --> T[("audit_event<br/>triggers: no UPDATE / DELETE")]
+    LOG --> H[("audit_chain_head<br/>locked per append")]
+    T --> V["GET /api/v1/audit/verify"]
+</pre></div>
+<h2>Step by step</h2><ol class="steps">
+<li><b>An action happens</b>, e.g. a senior reveals a national ID. The service calls <code>AuditPublisher.record(action, entityType, entityId, details)</code>; the actor is the JWT username (<code>CurrentUser</code>).</li>
+<li><b>After commit</b>, the event goes to the <code>sentinel.audit.events</code> queue. If the action rolls back, nothing is sent. alert-case's own events skip the queue and are appended in the same transaction.</li>
+<li><code>AuditEventConsumer</code> calls <code>AuditLog.append()</code>, which locks the single <code>audit_chain_head</code> row, ignores an <code>event_id</code> it already has, computes <code>SHA-256(seq | fields | prev_hash)</code> (<code>AuditChain.hash</code>), inserts the row and moves the head. The lock is released at commit.</li>
+<li>Failures roll back the JMS session: the broker retries, then parks the event in <code>DLQ.sentinel.audit.events</code> (shown on the Dead letters page, replayable without duplicates).</li>
+<li><code>GET /api/v1/audit/verify</code> (ADMIN) walks the chain from entry 1, recomputes every hash and compares links and the head. It names the first changed or missing entry.</li>
+<li><b>Cases:</b> <code>CaseService</code> locks the case row, enforces <code>expectedVersion</code>, the status rules, SENIOR_ANALYST + resolution for closing, and one case per alert (<code>UNIQUE(alert_id)</code>). Each change writes its audit entry in the same transaction; the case page shows them as History.</li>
+<li><b>PII:</b> customer responses always carry <code>idNumberMasked</code>. <code>POST /api/v1/customers/{id}/national-id/reveal {reason}</code> (SENIOR_ANALYST) returns the full value and records <code>PII_REVEALED</code>. <code>LoggingAspect.redact()</code> masks <code>idNumber</code>, tokens and secrets in request logs.</li>
+</ol>
+<h2>Components</h2><div class="table-wrap"><table><thead><tr><th>Component</th><th>Kind</th><th>Responsibility</th></tr></thead><tbody>
+<tr><td><a href="../../services/common-lib/src/main/java/com/sentinel/aml/common/audit/AuditPublisher.java"><code>AuditPublisher</code></a><span class="path">common-lib/…/audit/AuditPublisher.java</span></td><td><span class="badge k-service">Service</span></td><td>After-commit send to the audit queue</td></tr>
+<tr><td><a href="../../services/common-lib/src/main/java/com/sentinel/aml/common/audit/AuditEvent.java"><code>AuditEvent</code></a><span class="path">common-lib/…/audit/AuditEvent.java</span></td><td><span class="badge k-service">DTO / Event</span></td><td>Message contract</td></tr>
+<tr><td><a href="../../services/alert-case-service/src/main/java/com/sentinel/aml/alert_case_service/audit/AuditLog.java"><code>AuditLog</code></a><span class="path">alert-case-service/…/audit/AuditLog.java</span></td><td><span class="badge k-service">Service</span></td><td>Append under the head lock, verify, search</td></tr>
+<tr><td><a href="../../services/alert-case-service/src/main/java/com/sentinel/aml/alert_case_service/audit/AuditChain.java"><code>AuditChain</code></a><span class="path">alert-case-service/…/audit/AuditChain.java</span></td><td><span class="badge k-service">Service</span></td><td>The hash function (pure, tested)</td></tr>
+<tr><td><a href="../../services/alert-case-service/src/main/java/com/sentinel/aml/alert_case_service/audit/AuditEventConsumer.java"><code>AuditEventConsumer</code></a><span class="path">alert-case-service/…/audit/AuditEventConsumer.java</span></td><td><span class="badge k-listener">Listener</span></td><td>Queue → append</td></tr>
+<tr><td><a href="../../services/alert-case-service/src/main/java/com/sentinel/aml/alert_case_service/cases/CaseService.java"><code>CaseService</code></a><span class="path">alert-case-service/…/cases/CaseService.java</span></td><td><span class="badge k-service">Service</span></td><td>Case rules, locking, audit in the same transaction</td></tr>
+<tr><td><a href="../../services/customer-service/src/main/java/com/sentinel/aml/service/AccountService.java"><code>AccountService.revealNationalId</code></a><span class="path">customer-service/…/service/AccountService.java</span></td><td><span class="badge k-service">Service</span></td><td>Audited reveal</td></tr>
+<tr><td><a href="../../services/common-lib/src/main/java/com/sentinel/aml/common/aspect/LoggingAspect.java"><code>LoggingAspect.redact</code></a><span class="path">common-lib/…/aspect/LoggingAspect.java</span></td><td><span class="badge k-service">Aspect</span></td><td>PII and secrets out of logs</td></tr>
+</tbody></table></div>
+<h2>Data touched</h2><div class="table-wrap"><table><thead><tr><th>Store</th><th>Object</th><th>Access</th><th>When</th></tr></thead><tbody>
+<tr><td>MySQL alert_case_db</td><td><code>audit_event</code></td><td><span class="badge b-write">WRITE</span> (insert only)</td><td>Every audited action</td></tr>
+<tr><td>MySQL alert_case_db</td><td><code>audit_chain_head</code></td><td><span class="badge b-rw">READ/WRITE</span></td><td>Locked and moved per append</td></tr>
+<tr><td>MySQL alert_case_db</td><td><code>aml_case</code>, <code>case_alert</code>, <code>case_note</code></td><td><span class="badge b-rw">READ/WRITE</span></td><td>Case actions</td></tr>
+<tr><td>ActiveMQ</td><td>queue <code>sentinel.audit.events</code> (+ DLQ)</td><td><span class="badge b-rw">READ/WRITE</span></td><td>customer and detection → alert-case</td></tr>
+</tbody></table></div>
+</main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="assets/flows.js?v=3"></script>
+</body>
+</html>

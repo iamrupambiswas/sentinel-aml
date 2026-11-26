@@ -123,6 +123,34 @@
     {
       "key": "ingestTokenExpiry",
       "value": ""
+    },
+    {
+      "key": "seniorToken",
+      "value": ""
+    },
+    {
+      "key": "seniorTokenExpiry",
+      "value": ""
+    },
+    {
+      "key": "p7bCustomerId",
+      "value": ""
+    },
+    {
+      "key": "p7bAccount",
+      "value": ""
+    },
+    {
+      "key": "p7bAlertId",
+      "value": ""
+    },
+    {
+      "key": "p7bCaseId",
+      "value": ""
+    },
+    {
+      "key": "p7bCaseVersion",
+      "value": ""
     }
   ],
   "item": [
@@ -4480,7 +4508,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"both queues listed\", () => pm.expect(pm.response.json().data.map(q => q.sourceQueue)).to.have.members([\"sentinel.detection.hits\", \"sentinel.txn.ingested\"]));"
+                  "pm.test(\"all three queues listed (audit queue added in Phase 7b)\", () => pm.expect(pm.response.json().data.map(q => q.sourceQueue)).to.have.members([\"sentinel.audit.events\", \"sentinel.detection.hits\", \"sentinel.txn.ingested\"]));"
                 ]
               }
             }
@@ -5066,6 +5094,730 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "10 Phase 7 - Gateway limits",
+      "description": "Rate limiting (Redis token bucket per caller: burst 100, refill 20/s) and request body limits (1 MB JSON, 50 MB CSV uploads). A 429 needs a parallel burst; Postman sends requests one at a time, slower than the refill. See the manual guide for a one-line burst command.",
+      "item": [
+        {
+          "name": "1. Every response carries the caller's budget",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/alerts/stats",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"X-RateLimit-Limit is 100\", () => pm.expect(pm.response.headers.get(\"X-RateLimit-Limit\")).to.eql(\"100\"));",
+                  "pm.test(\"X-RateLimit-Remaining is a number\", () => pm.expect(Number(pm.response.headers.get(\"X-RateLimit-Remaining\"))).to.be.at.least(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Body over 1 MB is refused at the gateway (413)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/transactions",
+            "description": "Rejected before authentication and before any service sees it. CSV uploads to /api/v1/ingestion/batches get 50 MB instead.",
+            "body": {
+              "mode": "raw",
+              "raw": "{{bigBody}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// ~1.2 MB of JSON, built here so the collection file stays small",
+                  "pm.variables.set(\"bigBody\", JSON.stringify({ padding: \"x\".repeat(1200000) }));",
+                  "pm.variables.set(\"idemKey\", \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 413\", () => pm.response.to.have.status(413));",
+                  "pm.test(\"JSON message\", () => pm.expect(pm.response.json().message).to.include(\"too large\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "11 Phase 7b - Cases, audit trail, PII",
+      "description": "Cases (analysts open, seniors close), the hash-chained audit trail, audited PII reveal, combined Swagger.",
+      "item": [
+        {
+          "name": "1. Onboard a customer (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/customers",
+            "description": "The response never carries the full national ID, for any role.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"RETAIL\",\n  \"fullName\": \"Postman Phase7b\",\n  \"idNumber\": \"PAN-PMTB{{run}}\",\n  \"dob\": \"1988-02-14\",\n  \"nationality\": \"IND\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"national ID masked in the response\", () => pm.expect(d.idNumberMasked).to.match(/^\\*+.{1,4}$/));",
+                  "pm.collectionVariables.set(\"p7bCustomerId\", d.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Analyst reveals the national ID -> 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/customers/{{p7bCustomerId}}/national-id/reveal",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{analystToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"curious\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Fetch a Keycloak token for analyst1 once and reuse it until ~30 s before it expires",
+                  "if (!pm.collectionVariables.get(\"analystToken\") || Date.now() > Number(pm.collectionVariables.get(\"analystTokenExpiry\") || 0)) {",
+                  "  pm.sendRequest({ url: pm.collectionVariables.get(\"keycloakUrl\") + \"/protocol/openid-connect/token\", method: \"POST\",",
+                  "    body: { mode: \"urlencoded\", urlencoded: [{key: \"grant_type\", value: \"password\"}, {key: \"client_id\", value: \"sentinel-postman\"}, {key: \"username\", value: \"analyst1\"}, {key: \"password\", value: \"analyst1\"}] } },",
+                  "  (err, res) => { if (err || res.code !== 200) { console.error(\"token request failed\", err || res.text()); return; }",
+                  "    const t = res.json(); pm.collectionVariables.set(\"analystToken\", t.access_token); pm.collectionVariables.set(\"analystTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000)); });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Senior reveals without a reason -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/customers/{{p7bCustomerId}}/national-id/reveal",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seniorToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Fetch a Keycloak token for senior1 once and reuse it until ~30 s before it expires",
+                  "if (!pm.collectionVariables.get(\"seniorToken\") || Date.now() > Number(pm.collectionVariables.get(\"seniorTokenExpiry\") || 0)) {",
+                  "  pm.sendRequest({ url: pm.collectionVariables.get(\"keycloakUrl\") + \"/protocol/openid-connect/token\", method: \"POST\",",
+                  "    body: { mode: \"urlencoded\", urlencoded: [{key: \"grant_type\", value: \"password\"}, {key: \"client_id\", value: \"sentinel-postman\"}, {key: \"username\", value: \"senior1\"}, {key: \"password\", value: \"senior1\"}] } },",
+                  "  (err, res) => { if (err || res.code !== 200) { console.error(\"token request failed\", err || res.text()); return; }",
+                  "    const t = res.json(); pm.collectionVariables.set(\"seniorToken\", t.access_token); pm.collectionVariables.set(\"seniorTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000)); });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Senior reveals with a reason -> 200 (audited)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/customers/{{p7bCustomerId}}/national-id/reveal",
+            "description": "Written to the audit trail as PII_REVEALED with the user and reason.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seniorToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Postman: KYC refresh\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Fetch a Keycloak token for senior1 once and reuse it until ~30 s before it expires",
+                  "if (!pm.collectionVariables.get(\"seniorToken\") || Date.now() > Number(pm.collectionVariables.get(\"seniorTokenExpiry\") || 0)) {",
+                  "  pm.sendRequest({ url: pm.collectionVariables.get(\"keycloakUrl\") + \"/protocol/openid-connect/token\", method: \"POST\",",
+                  "    body: { mode: \"urlencoded\", urlencoded: [{key: \"grant_type\", value: \"password\"}, {key: \"client_id\", value: \"sentinel-postman\"}, {key: \"username\", value: \"senior1\"}, {key: \"password\", value: \"senior1\"}] } },",
+                  "  (err, res) => { if (err || res.code !== 200) { console.error(\"token request failed\", err || res.text()); return; }",
+                  "    const t = res.json(); pm.collectionVariables.set(\"seniorToken\", t.access_token); pm.collectionVariables.set(\"seniorTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000)); });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"full value returned\", () => pm.expect(pm.response.json().data.idNumber).to.include(\"PAN-PMTB\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. Post a CTR transaction for a fresh account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/transactions",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"EXT-CASH\",\n  \"destinationAccountId\": \"{{p7bAccount}}\",\n  \"amount\": 1500000,\n  \"currency\": \"INR\",\n  \"type\": \"CASH_DEPOSIT\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"p7bAccount\", \"ACC-P7B-\" + pm.collectionVariables.get(\"run\"));",
+                  "pm.request.headers.upsert({ key: \"Idempotency-Key\", value: \"pm-\" + pm.variables.replaceIn(\"{{$guid}}\") });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. Find the alert it created",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/alerts?accountId={{p7bAccount}}",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// give the asynchronous step time to finish",
+                  "setTimeout(() => {}, 2500);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const a = pm.response.json().data.content;",
+                  "pm.test(\"one CTR alert\", () => { pm.expect(a.length).to.eql(1); pm.expect(a[0].ruleCode).to.eql(\"CTR_THRESHOLD\"); });",
+                  "pm.collectionVariables.set(\"p7bAlertId\", a[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. Analyst opens a case with that alert",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/cases",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{analystToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Postman: CTR on {{p7bAccount}}\",\n  \"alertIds\": [\"{{p7bAlertId}}\"],\n  \"note\": \"Opened by the Postman run\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Fetch a Keycloak token for analyst1 once and reuse it until ~30 s before it expires",
+                  "if (!pm.collectionVariables.get(\"analystToken\") || Date.now() > Number(pm.collectionVariables.get(\"analystTokenExpiry\") || 0)) {",
+                  "  pm.sendRequest({ url: pm.collectionVariables.get(\"keycloakUrl\") + \"/protocol/openid-connect/token\", method: \"POST\",",
+                  "    body: { mode: \"urlencoded\", urlencoded: [{key: \"grant_type\", value: \"password\"}, {key: \"client_id\", value: \"sentinel-postman\"}, {key: \"username\", value: \"analyst1\"}, {key: \"password\", value: \"analyst1\"}] } },",
+                  "  (err, res) => { if (err || res.code !== 200) { console.error(\"token request failed\", err || res.text()); return; }",
+                  "    const t = res.json(); pm.collectionVariables.set(\"analystToken\", t.access_token); pm.collectionVariables.set(\"analystTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000)); });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "const s = pm.response.json().data.summary;",
+                  "pm.test(\"OPEN, one alert, number like CASE-000123\", () => { pm.expect(s.status).to.eql(\"OPEN\"); pm.expect(s.alertCount).to.eql(1); pm.expect(s.caseNumber).to.match(/^CASE-\\d{6}$/); });",
+                  "pm.collectionVariables.set(\"p7bCaseId\", s.id); pm.collectionVariables.set(\"p7bCaseVersion\", s.version);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "8. The alert now shows its case",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/alerts/{{p7bAlertId}}",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"caseId set\", () => pm.expect(String(pm.response.json().data.caseId)).to.eql(String(pm.collectionVariables.get(\"p7bCaseId\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "9. Same alert in a second case -> 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/cases",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{analystToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"duplicate\",\n  \"alertIds\": [\"{{p7bAlertId}}\"]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Fetch a Keycloak token for analyst1 once and reuse it until ~30 s before it expires",
+                  "if (!pm.collectionVariables.get(\"analystToken\") || Date.now() > Number(pm.collectionVariables.get(\"analystTokenExpiry\") || 0)) {",
+                  "  pm.sendRequest({ url: pm.collectionVariables.get(\"keycloakUrl\") + \"/protocol/openid-connect/token\", method: \"POST\",",
+                  "    body: { mode: \"urlencoded\", urlencoded: [{key: \"grant_type\", value: \"password\"}, {key: \"client_id\", value: \"sentinel-postman\"}, {key: \"username\", value: \"analyst1\"}, {key: \"password\", value: \"analyst1\"}] } },",
+                  "  (err, res) => { if (err || res.code !== 200) { console.error(\"token request failed\", err || res.text()); return; }",
+                  "    const t = res.json(); pm.collectionVariables.set(\"analystToken\", t.access_token); pm.collectionVariables.set(\"analystTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000)); });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "10. Analyst tries to close -> 403",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/cases/{{p7bCaseId}}",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{analystToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CLOSED_NO_ACTION\",\n  \"resolution\": \"x\",\n  \"expectedVersion\": {{p7bCaseVersion}}\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Fetch a Keycloak token for analyst1 once and reuse it until ~30 s before it expires",
+                  "if (!pm.collectionVariables.get(\"analystToken\") || Date.now() > Number(pm.collectionVariables.get(\"analystTokenExpiry\") || 0)) {",
+                  "  pm.sendRequest({ url: pm.collectionVariables.get(\"keycloakUrl\") + \"/protocol/openid-connect/token\", method: \"POST\",",
+                  "    body: { mode: \"urlencoded\", urlencoded: [{key: \"grant_type\", value: \"password\"}, {key: \"client_id\", value: \"sentinel-postman\"}, {key: \"username\", value: \"analyst1\"}, {key: \"password\", value: \"analyst1\"}] } },",
+                  "  (err, res) => { if (err || res.code !== 200) { console.error(\"token request failed\", err || res.text()); return; }",
+                  "    const t = res.json(); pm.collectionVariables.set(\"analystToken\", t.access_token); pm.collectionVariables.set(\"analystTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000)); });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "11. Senior closes with a resolution -> 200",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/cases/{{p7bCaseId}}",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seniorToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CLOSED_NO_ACTION\",\n  \"resolution\": \"Postman: test data\",\n  \"expectedVersion\": {{p7bCaseVersion}}\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Fetch a Keycloak token for senior1 once and reuse it until ~30 s before it expires",
+                  "if (!pm.collectionVariables.get(\"seniorToken\") || Date.now() > Number(pm.collectionVariables.get(\"seniorTokenExpiry\") || 0)) {",
+                  "  pm.sendRequest({ url: pm.collectionVariables.get(\"keycloakUrl\") + \"/protocol/openid-connect/token\", method: \"POST\",",
+                  "    body: { mode: \"urlencoded\", urlencoded: [{key: \"grant_type\", value: \"password\"}, {key: \"client_id\", value: \"sentinel-postman\"}, {key: \"username\", value: \"senior1\"}, {key: \"password\", value: \"senior1\"}] } },",
+                  "  (err, res) => { if (err || res.code !== 200) { console.error(\"token request failed\", err || res.text()); return; }",
+                  "    const t = res.json(); pm.collectionVariables.set(\"seniorToken\", t.access_token); pm.collectionVariables.set(\"seniorTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000)); });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"closed, final, history recorded\", () => { pm.expect(d.summary.status).to.eql(\"CLOSED_NO_ACTION\"); pm.expect(d.allowedNextStatuses).to.be.empty; pm.expect(d.history[0].action).to.eql(\"CASE_CLOSED\"); pm.expect(d.history[0].actor).to.eql(\"senior1\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "12. Audit trail as analyst -> 403",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/audit",
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{analystToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Fetch a Keycloak token for analyst1 once and reuse it until ~30 s before it expires",
+                  "if (!pm.collectionVariables.get(\"analystToken\") || Date.now() > Number(pm.collectionVariables.get(\"analystTokenExpiry\") || 0)) {",
+                  "  pm.sendRequest({ url: pm.collectionVariables.get(\"keycloakUrl\") + \"/protocol/openid-connect/token\", method: \"POST\",",
+                  "    body: { mode: \"urlencoded\", urlencoded: [{key: \"grant_type\", value: \"password\"}, {key: \"client_id\", value: \"sentinel-postman\"}, {key: \"username\", value: \"analyst1\"}, {key: \"password\", value: \"analyst1\"}] } },",
+                  "  (err, res) => { if (err || res.code !== 200) { console.error(\"token request failed\", err || res.text()); return; }",
+                  "    const t = res.json(); pm.collectionVariables.set(\"analystToken\", t.access_token); pm.collectionVariables.set(\"analystTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000)); });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "13. Audit trail as senior shows the reveal",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/audit?entityType=CUSTOMER&entityId={{p7bCustomerId}}",
+            "description": "customer-service events arrive over sentinel.audit.events, so they can lag a second.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seniorToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Fetch a Keycloak token for senior1 once and reuse it until ~30 s before it expires",
+                  "if (!pm.collectionVariables.get(\"seniorToken\") || Date.now() > Number(pm.collectionVariables.get(\"seniorTokenExpiry\") || 0)) {",
+                  "  pm.sendRequest({ url: pm.collectionVariables.get(\"keycloakUrl\") + \"/protocol/openid-connect/token\", method: \"POST\",",
+                  "    body: { mode: \"urlencoded\", urlencoded: [{key: \"grant_type\", value: \"password\"}, {key: \"client_id\", value: \"sentinel-postman\"}, {key: \"username\", value: \"senior1\"}, {key: \"password\", value: \"senior1\"}] } },",
+                  "  (err, res) => { if (err || res.code !== 200) { console.error(\"token request failed\", err || res.text()); return; }",
+                  "    const t = res.json(); pm.collectionVariables.set(\"seniorToken\", t.access_token); pm.collectionVariables.set(\"seniorTokenExpiry\", String(Date.now() + (t.expires_in - 30) * 1000)); });",
+                  "}",
+                  "// give the asynchronous step time to finish",
+                  "setTimeout(() => {}, 1500);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const actions = pm.response.json().data.content.map(e => e.action);",
+                  "pm.test(\"onboarding and reveal recorded\", () => pm.expect(actions).to.include.members([\"CUSTOMER_ONBOARDED\", \"PII_REVEALED\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "14. Verify the whole chain (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/audit/verify",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"chain intact\", () => pm.expect(pm.response.json().data.valid).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15. Combined Swagger: alert-case API through the gateway",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v3/api-docs/alert-case",
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json();",
+                  "pm.test(\"cases and audit documented, served via the gateway\", () => { pm.expect(Object.keys(d.paths)).to.include(\"/api/v1/cases\"); pm.expect(d.servers[0].url).to.eql(\"http://localhost:8080\"); });"
                 ]
               }
             }

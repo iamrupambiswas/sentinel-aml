@@ -18,6 +18,7 @@ public class SecurityRoutes {
                 .requestMatchers(GET, ApiRoutes.CUSTOMERS + "/**", ApiRoutes.ACCOUNTS + "/**").hasRole(ANALYST)
                 .requestMatchers(PUT, ApiRoutes.CUSTOMERS + "/*/risk-rating", ApiRoutes.ACCOUNTS + "/*/risk-rating")
                         .hasRole(SENIOR_ANALYST)
+                .requestMatchers(POST, ApiRoutes.CUSTOMERS + "/*/national-id/reveal").hasRole(SENIOR_ANALYST)
                 .requestMatchers(POST, ApiRoutes.CUSTOMERS, ApiRoutes.CUSTOMERS + "/*/accounts").hasRole(ADMIN)
                 .requestMatchers(ApiRoutes.ADMIN + "/**").hasRole(ADMIN);
     }

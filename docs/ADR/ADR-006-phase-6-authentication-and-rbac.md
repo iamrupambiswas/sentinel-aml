@@ -230,7 +230,7 @@ cd services && mvn test -pl common-lib,detection-service -Dtest='SentinelSecurit
 | Rule changes attributed to the authenticated user | ✅ `changedBy` from `preferred_username` |
 | Automated tests for role mapping and route rules | ✅ 8 tests |
 | Postman: collection authenticates itself; 401/403 folder | ✅ 100 requests (folder 09 added) |
-| Full Postman / newman run against live Keycloak | ⚠️ not run when this was written (Docker was not running). Run before merging, see §10 |
+| Full Postman / newman run against live Keycloak | ✅ verified 2026-11-21 during Phase 7: 109 requests, 184 assertions, 0 failures (see ADR-007 §8) |
 | Role-based PII unmasking (full national ID for SENIOR_ANALYST) | ❌ carried forward |
 | Mask sensitive args in `LoggingAspect` | ❌ carried forward |
 | Append-only hash-chained `audit_event` | ❌ carried forward |
